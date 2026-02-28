@@ -88,6 +88,7 @@ class AudioEngine {
     this.dryGain=null;this.compressor=null;this.activeNodes=new Map();
     this.adsr={attack:0.02,decay:0.1,sustain:0.7,release:0.3};
     this.waveform='triangle';this.volume=0.75;this.reverbAmount=0.25;
+    this.onRecord=null;
   }
   init(){
     if(this.ctx)return;
@@ -115,6 +116,7 @@ class AudioEngine {
     env.gain.linearRampToValueAtTime(sustain*pk,t+attack+decay);
     osc.connect(env);env.connect(this.dryGain);env.connect(this.reverb);osc.start(t);
     this.activeNodes.set(id,{osc,env});
+    if(this.onRecord){const delay=at?(at-this.ctx.currentTime)*1000:0;this.onRecord({type:'on',id,freq,vel,t:Date.now()+delay});}
   }
   noteOff(id,at=null){
     const node=this.activeNodes.get(id);if(!node)return;
@@ -122,6 +124,7 @@ class AudioEngine {
     env.gain.cancelScheduledValues(t);env.gain.setValueAtTime(env.gain.value,t);
     env.gain.linearRampToValueAtTime(0,t+release);osc.stop(t+release+0.05);
     this.activeNodes.delete(id);
+    if(this.onRecord){const delay=at?(at-this.ctx.currentTime)*1000:0;this.onRecord({type:'off',id,t:Date.now()+delay});}
   }
   allNotesOff(){for(const id of this.activeNodes.keys())this.noteOff(id);}
 }
@@ -200,6 +203,21 @@ export default function AirPiano() {
   const [chord,setChord]           = useState(null);
   const [roll,dispatch]            = useReducer(rollReducer,[]);
 
+  // ── Recording slots ──
+  const [recordings,setRecordings] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem('pp_recordings')||'null')||Array(8).fill(null);}catch{return Array(8).fill(null);}
+  });
+  const [recArmed,setRecArmed]     = useState(false);
+  const [recSlot,setRecSlot]       = useState(null);
+  const [playSlot,setPlaySlot]     = useState(null);
+  const recRef  = useRef({slot:null,start:0,events:[]});
+  const playRef = useRef({timers:[],slot:null});
+
+  // ── Tap tempo / metronome ──
+  const tapTimesRef = useRef([]);
+  const metroRef    = useRef(null);
+  const [metroActive,setMetroActive] = useState(false);
+
   const oct1 = buildOctave(octave, 4);
   const oct2 = buildOctave(octave + 1, 5);
   oct2.whites.forEach((w, i) => w.whiteIdx = 7 + i);
@@ -219,6 +237,90 @@ export default function AirPiano() {
         (id,t)=>audio.current.noteOff(id,t));
     } else if (audio.current.ctx.state === 'suspended') {
       audio.current.ctx.resume();
+    }
+  }
+
+  // ── Recording functions ──
+  function startRecording(slot){
+    if(playSlot!==null)stopPlayback();
+    recRef.current={slot,start:Date.now(),events:[]};
+    audio.current.onRecord=(evt)=>{recRef.current.events.push({...evt,t:evt.t-recRef.current.start});};
+    setRecSlot(slot);
+  }
+  function stopRecording(){
+    audio.current.onRecord=null;
+    const{slot,start,events}=recRef.current;
+    if(slot===null||!events.length){setRecSlot(null);setRecArmed(false);return;}
+    const duration=Date.now()-start;
+    setRecordings(prev=>{
+      const next=[...prev];next[slot]={events,duration};
+      try{localStorage.setItem('pp_recordings',JSON.stringify(next));}catch{}
+      return next;
+    });
+    setRecSlot(null);setRecArmed(false);
+  }
+  function playRecording(i){
+    const rec=recordings[i];if(!rec)return;
+    ensureAudio();stopPlayback();setPlaySlot(i);
+    const timers=rec.events.map(evt=>
+      setTimeout(()=>{if(evt.type==='on')audio.current.noteOn(evt.id,evt.freq,evt.vel);else audio.current.noteOff(evt.id);},evt.t)
+    );
+    timers.push(setTimeout(()=>{setPlaySlot(null);playRef.current={timers:[],slot:null};},rec.duration+200));
+    playRef.current={timers,slot:i};
+  }
+  function stopPlayback(){
+    playRef.current.timers.forEach(t=>clearTimeout(t));
+    playRef.current={timers:[],slot:null};
+    audio.current.allNotesOff();setPlaySlot(null);
+  }
+  function clearSlot(i){
+    if(playSlot===i)stopPlayback();
+    setRecordings(prev=>{
+      const next=[...prev];next[i]=null;
+      try{localStorage.setItem('pp_recordings',JSON.stringify(next));}catch{}
+      return next;
+    });
+  }
+  function handleSlotClick(i){
+    if(recArmed){
+      if(recSlot===i){stopRecording();}
+      else{if(recSlot!==null)stopRecording();startRecording(i);}
+    }else{
+      if(playSlot===i)stopPlayback();
+      else if(recordings[i])playRecording(i);
+    }
+  }
+
+  // ── Tap tempo / metronome ──
+  function metroClick(){
+    if(!audio.current.ctx)return;
+    const ctx=audio.current.ctx,osc=ctx.createOscillator(),g=ctx.createGain();
+    osc.frequency.value=1000;osc.type='sine';
+    g.gain.setValueAtTime(0.3,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.05);
+    osc.connect(g);g.connect(audio.current.compressor);osc.start();osc.stop(ctx.currentTime+0.06);
+  }
+  function startMetronome(bpmVal){
+    if(metroRef.current)clearInterval(metroRef.current);
+    metroClick();
+    metroRef.current=setInterval(metroClick,60000/bpmVal);
+    setMetroActive(true);
+  }
+  function stopMetronome(){
+    if(metroRef.current){clearInterval(metroRef.current);metroRef.current=null;}
+    setMetroActive(false);
+  }
+  function handleTap(){
+    ensureAudio();
+    const now=Date.now();
+    if(metroActive){stopMetronome();tapTimesRef.current=[];return;}
+    tapTimesRef.current=tapTimesRef.current.filter(t=>now-t<2000);
+    tapTimesRef.current.push(now);
+    if(tapTimesRef.current.length>=2){
+      const times=tapTimesRef.current,intervals=[];
+      for(let i=1;i<times.length;i++)intervals.push(times[i]-times[i-1]);
+      const avgMs=intervals.reduce((a,b)=>a+b,0)/intervals.length;
+      const newBpm=Math.max(40,Math.min(240,Math.round(60000/avgMs)));
+      setBpm(newBpm);startMetronome(newBpm);
     }
   }
 
@@ -680,6 +782,31 @@ export default function AirPiano() {
 
       {/* Roll */}
       <div style={{width:'100%',maxWidth:W}}><PianoRoll/></div>
+
+      {/* Recording slots + Tap tempo */}
+      <div style={{width:'100%',maxWidth:W,display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+        <button onClick={()=>{if(recSlot!==null)stopRecording();setRecArmed(a=>!a);}} style={{...BS,background:recArmed?'rgba(255,60,60,0.25)':'rgba(255,60,60,0.08)',border:`1px solid ${recArmed?'rgba(255,60,60,0.7)':'rgba(255,60,60,0.3)'}`,color:recArmed?'#ff6060':'#c08080',borderRadius:5,padding:'3px 9px',fontSize:'0.68rem',fontWeight:'bold'}}>
+          {recArmed?'● REC':'REC'}
+        </button>
+        {recordings.map((rec,i)=>{
+          const isRec=recSlot===i;const isPlay=playSlot===i;const filled=!!rec;
+          return(
+            <button key={i} onClick={()=>handleSlotClick(i)} onContextMenu={e=>{e.preventDefault();if(filled)clearSlot(i);}}
+              style={{...BS,minWidth:28,padding:'3px 6px',borderRadius:5,fontSize:'0.68rem',fontFamily:'monospace',
+                background:isRec?'rgba(255,60,60,0.3)':isPlay?'rgba(100,200,100,0.25)':filled?'rgba(232,201,122,0.12)':'rgba(255,255,255,0.05)',
+                border:`1px solid ${isRec?'rgba(255,60,60,0.7)':isPlay?'rgba(100,200,100,0.6)':filled?'rgba(232,201,122,0.3)':'rgba(255,255,255,0.1)'}`,
+                color:isRec?'#ff6060':isPlay?'#90d890':filled?'#e8c97a':'#6a6080'}}>
+              {isRec?'●':isPlay?'▶':i+1}
+            </button>
+          );
+        })}
+        <div style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
+          {metroActive&&<span style={{fontSize:'0.62rem',fontFamily:'monospace',color:'#90d890'}}>{bpm} bpm</span>}
+          <button onClick={handleTap} style={{...BS,background:metroActive?'rgba(100,200,100,0.2)':'rgba(255,255,255,0.05)',border:`1px solid ${metroActive?'rgba(100,200,100,0.5)':'rgba(255,255,255,0.1)'}`,color:metroActive?'#90d890':'#8a8090',borderRadius:5,padding:'3px 9px',fontSize:'0.68rem',fontWeight:'bold'}}>
+            {metroActive?'■ TAP':'TAP'}
+          </button>
+        </div>
+      </div>
 
       {/* Controls */}
       <div style={{display:'flex',gap:5,flexWrap:'wrap',justifyContent:'center',width:'100%',maxWidth:W}}>
