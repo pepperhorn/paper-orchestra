@@ -4,86 +4,99 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Paper Piano (formerly Air Piano v3) is a browser-based musical instrument that uses MediaPipe hand tracking and ArUco marker detection on a printed physical template. The 2-octave keyboard uses DICT_4X4_1000 ArUco markers. Users place objects on printed ArUco markers to change modes (chords, arpeggios, octave, sustain) and play notes by tapping fingers over printed piano keys. No server backend — everything runs client-side.
+Paper Orchestra is a collection of browser-based musical instruments that use camera-based detection (MediaPipe hand tracking, ArUco markers, colour blob detection) on printed physical templates. Each instrument has its own printed template and detection logic. No server backend — everything runs client-side.
+
+**Wave 1 instruments** (implemented): Paper Piano, Paper Drum, Paper Wind
+**Wave 2 instruments** (stub): Paper Guitar, Paper Drum Machine, Paper Sequencer, Paper String
 
 ## Commands
 
-- `npm run dev` — Start Vite dev server on port 5173 (required for camera access via localhost secure context)
-- `npm run build` — Production build
-- `npm run preview` — Preview production build
+- `pnpm dev` — Start Vite dev server on port 5173 (required for camera access via localhost secure context)
+- `pnpm build` — Production build
+- `pnpm preview` — Preview production build
 
 No test framework is configured. Testing is done live in-browser with camera + printed template.
 
 ## Architecture
 
-~800 lines of source across 3 files. Single-page React 18 app built with Vite.
+Modular React 18 app with React Router, built with Vite + Tailwind CSS v4. Audio via Tone.js (synth/sampler/effects) and raw Web Audio (mic/breath analysis).
 
-### Source Files
+### Source Structure
 
-- **`src/AirPiano.jsx`** (~630 lines) — Monolithic main component containing:
-  - `AudioEngine` class: Web Audio API synth with oscillators, ADSR envelopes, reverb (procedural convolver impulse), and dynamics compression
-  - `VelocityTracker` class: Circular buffer (6 samples) tracking finger Y-velocity for note dynamics
-  - Marker-based key detection: `getKey()` compares finger pixel position to scanned ArUco marker positions (nearest-marker with upper-zone black key priority)
-  - Ribbon detection: `getRibbon()` interpolates finger Y between ribbon marker positions
-  - All React state, refs, the real-time detection loop, scan flow, ArUco tag processing, and UI rendering
-- **`src/engines.js`** (~147 lines) — `CHORD_TYPES` (8 types: maj/min/maj7/dom7/hdim/dim/aug/pwr), `buildChordNotes()` voicing builder, and `ArpEngine` class (clock-compensated arpeggio sequencer with 5 patterns × 5 rates, 80ms lookahead)
-- **`src/main.jsx`** — React entry point, renders `<AirPiano />`
-- **`piano_template_v3.html`** — Printable A4 landscape template with ArUco markers (self-contained HTML with inline JS marker generation)
+```
+src/
+├── shared/
+│   ├── detection/     # camera, aruco, hands, face-mesh, scan, ghost, colour-blob, homography(stub)
+│   ├── audio/         # manager (Tone.js singleton), synth, sampler, effects, transport, recorder, mic-analyser
+│   ├── engine/        # velocity, chords, arp, key-detect, ribbon, gestures(stub)
+│   ├── components/ui/ # instrument-shell, camera-overlay, scan-button, knob, meter-bar, piano-roll, transport-controls, settings-panel, status-indicator, pattern-slots(stub)
+│   ├── hooks/         # use-camera, use-hand-tracking, use-scan, use-audio, use-transport
+│   └── lib/           # utils.js (cn() helper)
+├── instruments/
+│   ├── piano/         # PaperPiano.jsx + piano-config.js + piano-engine.js
+│   ├── drum/          # PaperDrum.jsx + drum-config.js + drum-engine.js
+│   ├── wind/          # PaperWind.jsx + wind-config.js + wind-engine.js
+│   ├── guitar/        # Wave 2 stub
+│   ├── drum-machine/  # Wave 2 stub
+│   ├── sequencer/     # Wave 2 stub
+│   └── string/        # Wave 2 stub
+├── pages/             # Launcher.jsx, InstrumentPage.jsx (lazy-loads instruments)
+├── App.jsx            # React Router: / → Launcher, /instrument/:id → InstrumentPage
+├── main.jsx           # Entry point with BrowserRouter
+└── index.css          # Tailwind v4 + theme tokens
+```
 
-### External Libraries (CDN-loaded, not in package.json)
+### Path Aliases
 
-- **@mediapipe/hands** — 21-landmark hand tracking, up to 2 hands, lite model
+- `@shared` → `src/shared`
+- `@instruments` → `src/instruments`
+
+### External Libraries (CDN-loaded at runtime)
+
+- **@mediapipe/hands** — 21-landmark hand tracking, up to 2 hands
 - **@mediapipe/camera_utils** — Video stream management
-- **js-aruco2 v1.0.4** — ArUco marker detection (DICT_4X4_1000, loaded via separate dictionary file). "Ghost marker" pattern: covered tag = activated mode
+- **@mediapipe/face_mesh** — Lip/face detection (wind instrument)
+- **js-aruco2 v1.0.4** — ArUco marker detection (multiple dictionaries)
 
-### ArUco Tag ID Map (v3.1 — 2-octave marker-based detection)
+### Key Patterns
 
-| Range | Count | Purpose | Detection Method |
-|-------|-------|---------|-----------------|
-| 0-6   | 7  | White key positions octave 1 (C D E F G A B) | Position reference |
-| 8-12  | 5  | Black key positions octave 1 (C# D# F# G# A#) | Position reference |
-| 13-22 | 10 | Ribbon strip segments (bottom=13 to top=22) | Position reference |
-| 23-30 | 8  | Chord types | Ghost (cover to activate) |
-| 31-35 | 5  | Arp patterns | Ghost (cover to activate) |
-| 36-40 | 5  | Arp rates | Ghost (cover to activate) |
-| 41-42 | 2  | Octave ± | Ghost (cover to activate) |
-| 43    | 1  | Sustain | Ghost (cover to activate) |
-| 44-45 | 2  | MOD / VOL mode | Ghost (cover to activate) |
-| 46-52 | 7  | White key positions octave 2 (C D E F G A B) | Position reference |
-| 53-57 | 5  | Black key positions octave 2 (C# D# F# G# A#) | Position reference |
-| 58    | 1  | Top C (highest white key) | Position reference |
+- **Audio**: `audioManager.ensure()` starts Tone.js context. `createSynthEngine()` wraps Tone.PolySynth with ID-based `noteOn(id, freq, vel, time)`/`noteOff(id, time)`. Wind instrument uses raw Web Audio oscillators via `audioManager.getContext()`.
+- **Detection**: `loadArucoLibrary(dict)` + `createDetector(dict)` + `detectMarkers(detector, canvas)`. Camera init via `initCamera(videoEl)` with environment→user→any fallback.
+- **Ghost markers**: `detectCoveredMarkers(knownMarkers, visibleSet, positionTagSet)` — known marker not visible = object covering it = activated.
+- **Scan flow**: 2-second scan window → markers saved to localStorage → restored on reload.
 
-Total: 59 markers used out of 1000 (DICT_4X4_1000).
+### Piano ArUco Tag Map (DICT_4X4_1000)
 
-**Two marker categories:**
-1. **Position markers** (0-6, 8-22, 46-58): Must stay visible during play. Define spatial layout. Excluded from ghost-marker logic via `POSITION_TAGS` set. (ID 7 unused.)
-2. **Control markers** (23-45): Ghost-marker detection. Placed ABOVE keyboard on template so user's hands don't obstruct camera view. Cover with object to activate.
+| Range | Purpose | Detection |
+|-------|---------|-----------|
+| 0-6, 46-52, 58 | White key positions (2 octaves + top C) | Position reference |
+| 8-12, 53-57 | Black key positions | Position reference |
+| 13-22 | Ribbon strip segments | Position reference |
+| 23-30 | Chord types (8) | Ghost (cover to activate) |
+| 31-35 | Arp patterns (5) | Ghost |
+| 36-40 | Arp rates (5) | Ghost |
+| 41-42 | Octave ± | Ghost |
+| 43 | Sustain | Ghost |
+| 44-45 | MOD / VOL mode | Ghost |
 
-### Data Flow
+### Drum Detection (DICT_6X6_250)
 
-1. App loads CDN libs → requests camera → inits MediaPipe + ArUco detector
-2. Scan: user clicks Scan button → 2-second window learns all marker positions → saved to localStorage key `airpiano_v3_markers`
-3. Per-frame loop: ArUco detection (which control markers are covered → mode changes) → per-hand/per-fingertip tracking → pixel-space key detection via nearest marker → velocity-based note triggering with optional chord voicing and arp scheduling → piano roll update
+ArUco markers identify pad positions, then colour signature sampling + tracking detects strikes via occlusion state machine (PRESENT → OCCLUDED → COOLDOWN → PRESENT).
 
-### Key Detection Algorithm
+### Wind Detection
 
-- Key markers (0-12) are printed ABOVE the piano keys on the template
-- When a finger plays a key, it's BELOW the marker in camera view
-- Key zone extends from marker row Y downward by `avgKeyWidth * 2.5` (proportional to piano key aspect ratio)
-- Black keys only checked in upper 60% of key zone (matching real piano proportions)
-- White keys: nearest horizontally within `avgKeyWidth * 0.6` threshold
-- Black keys: nearest horizontally within `avgKeyWidth * 0.4` threshold (narrower)
-
-### State
-
-All state lives in the `AirPiano` component via `useState`/`useReducer`. Non-reactive state (AudioEngine, VelocityTracker, ArpEngine, ArUco detector, scanned markers, pressed keys) stored in refs.
+Blob topology detection (6 vertical blobs = whistle, 3 horizontal = trumpet). MediaPipe Hands Z-depth for whistle hole coverage. FaceMesh for lip aperture. Mic analyser for breath/voice. BreathFusion OR-gates all sources.
 
 ## Key Constraints
 
-- Port 5173 is hardcoded in vite.config.js — required for localhost camera access
-- Camera preference order: environment → user → any (for mobile compatibility)
-- MediaPipe hands config: model complexity 0, detection confidence 0.72, tracking confidence 0.55
-- Octave shift has 1.5s debounce to prevent rapid triggering from object placement
-- Arp scheduler uses ~20ms poll interval with 80ms Web Audio lookahead for timing accuracy
-- Audio context requires user gesture — `ensureAudio()` called on first click via main div onClick
-- Scan requires at least 8 markers detected to transition to 'ready' state
+- Port 5173 hardcoded in vite.config.js
+- Camera preference: environment → user → any
+- MediaPipe hands: complexity 0, detection 0.72, tracking 0.55 (piano); complexity 1, detection 0.65, tracking 0.6 (wind)
+- Piano octave shift: 1.5s debounce
+- Arp scheduler: ~20ms poll, 80ms lookahead
+- Audio context requires user gesture
+- Piano scan: minimum 8 markers; drum scan: minimum 2 pads
+
+## Legacy Files
+
+`src/AirPiano.jsx` and `src/engines.js` are the original monolithic source. They remain in the repo for reference but are not imported by the new code.
