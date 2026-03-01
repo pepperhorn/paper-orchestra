@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CamInstrument</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+
+/* ── MODE-DRIVEN THEMING ── */
+:root {
+  --mode-c:     #5a7aff;
+  --mode-dim:   #0d1230;
+  --mode-mid:   #1a2260;
+  --bg:         #090909;
+  --surface:    #111010;
+  --border:     #1e1c18;
+  --text:       #ddd8cc;
+  --muted:      #5a5548;
+  --trans: color 0.6s, background-color 0.6s, border-color 0.6s, box-shadow 0.6s;
+}
+body.whistle  { --mode-c: #48e89a; --mode-dim: #0b2a1e; --mode-mid: #153d28; }
+body.trumpet  { --mode-c: #f0b840; --mode-dim: #2a1e08; --mode-mid: #3d2c0a; }
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 48px 1fr 32px;
+  overflow: hidden;
+}
+
+/* ── HEADER ── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.wordmark {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: 0.1em;
+  color: var(--mode-c);
+  transition: var(--trans);
+  white-space: nowrap;
+}
+
+.mode-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px 3px 8px;
+  border: 1px solid var(--mode-c);
+  background: var(--mode-dim);
+  transition: var(--trans);
+}
+.mode-badge .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mode-c);
+  transition: var(--trans);
+  animation: modePulse 2s infinite;
+}
+.mode-badge span {
+  font-size: 0.6rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--mode-c);
+  transition: var(--trans);
+}
+@keyframes modePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.tags { display:flex; gap:6px; margin-left:auto; }
+.tag {
+  font-size: 0.55rem;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: var(--trans);
+}
+.tag.on   { border-color: var(--mode-c); color: var(--mode-c); }
+.tag.blow { background: var(--mode-dim); border-color: var(--mode-c);
+            color: var(--mode-c); animation: modePulse 0.5s infinite alternate; }
+
+/* ── MAIN LAYOUT ── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  overflow: hidden;
+}
+
+/* ── CAMERA ── */
+.cam-wrap {
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#vid {
+  width:100%; height:100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+#vid.live { opacity:1; }
+#overlay {
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  pointer-events:none;
+}
+/* Scanning animation on camera when in scan mode */
+.scan-line {
+  position:absolute; left:0; right:0; height:1px;
+  background: linear-gradient(90deg, transparent, var(--mode-c), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  animation: scanMove 2s linear infinite;
+}
+body.scanning .scan-line { opacity: 0.6; }
+@keyframes scanMove { from{top:0%} to{top:100%} }
+
+.cam-start {
+  position:absolute;
+  display:flex; flex-direction:column; align-items:center; gap:14px;
+  text-align:center; z-index:10;
+}
+.cam-start .icon { font-size:3rem; opacity:0.35; }
+.cam-start p { font-size:0.7rem; color:var(--muted); max-width:240px; line-height:1.7; }
+.start-btn {
+  font-family:'IBM Plex Mono',monospace; font-size:0.7rem; font-weight:600;
+  padding:9px 24px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;
+  background:var(--mode-dim); border:1px solid var(--mode-c); color:var(--mode-c);
+  transition: all 0.2s;
+}
+.start-btn:hover { background:var(--mode-c); color:#000; }
+
+/* Confidence bar overlaid on camera */
+.conf-bar-wrap {
+  position:absolute; bottom:0; left:0; right:0; height:3px;
+  background: rgba(0,0,0,0.5);
+  opacity:0; transition: opacity 0.3s;
+}
+body.scanning .conf-bar-wrap { opacity:1; }
+.conf-bar {
+  height:100%; width:0%;
+  background: var(--mode-c);
+  transition: width 0.1s linear, background 0.6s;
+}
+
+/* ── RIGHT PANEL ── */
+.panel {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── NOTE DISPLAY ── */
+.note-display {
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.note-big {
+  font-family:'Bebas Neue', sans-serif;
+  font-size: 6.5rem;
+  line-height: 1;
+  color: var(--mode-c);
+  transition: var(--trans);
+  letter-spacing: 0.04em;
+  min-height: 6.5rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.note-big.silent { color: var(--muted); opacity:0.25; }
+.note-big.playing { text-shadow: 0 0 40px color-mix(in srgb, var(--mode-c) 40%, transparent); }
+.note-sub {
+  font-size:0.6rem; color:var(--muted);
+  letter-spacing:0.08em; margin-top:3px;
+  min-height:1rem;
+}
+
+/* ── BREATH SECTION ── */
+.breath-section {
+  padding:12px 22px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.sec-label {
+  font-size:0.52rem; letter-spacing:0.16em;
+  text-transform:uppercase; color:var(--muted);
+  margin-bottom:8px; display:flex; align-items:center; gap:8px;
+}
+.breath-meters { display:flex; flex-direction:column; gap:6px; }
+.breath-row { display:flex; align-items:center; gap:8px; }
+.breath-row-label { font-size:0.5rem; color:var(--muted); width:26px; text-align:right; flex-shrink:0; }
+.breath-track {
+  flex:1; height:5px; background:rgba(0,0,0,0.4);
+  border:1px solid var(--border); border-radius:2px; overflow:hidden;
+}
+.breath-fill {
+  height:100%; width:0%;
+  background:linear-gradient(90deg, var(--mode-c), color-mix(in srgb, var(--mode-c) 60%, white));
+  border-radius:2px; transition: width 0.04s linear, background 0.6s;
+}
+/* Lip aperture zone marker */
+.apt-track { position:relative; }
+.apt-zone {
+  position:absolute; top:0; bottom:0;
+  left:6%; width:38%;
+  background:rgba(255,255,255,0.04);
+  border-left:1px solid rgba(255,255,255,0.12);
+  border-right:1px solid rgba(255,255,255,0.12);
+}
+.breath-status { font-size:0.55rem; color:var(--muted); margin-top:6px; }
+.breath-status.blowing { color:var(--mode-c); transition: color 0.2s; }
+
+/* ── INSTRUMENT AREA (mode-specific) ── */
+.instrument-area {
+  flex:1; overflow:hidden;
+  position:relative;
+}
+/* Each mode panel stacks and transitions */
+.mode-panel {
+  position:absolute; inset:0;
+  display:flex; flex-direction:column;
+  opacity:0; pointer-events:none;
+  transition: opacity 0.4s;
+  overflow-y:auto;
+}
+.mode-panel.active { opacity:1; pointer-events:auto; }
+
+/* SCANNING PANEL */
+.scan-panel {
+  align-items:center; justify-content:center; padding:30px 22px;
+  text-align:center;
+}
+.scan-icon { font-size:3.5rem; margin-bottom:16px; opacity:0.25; }
+.scan-title {
+  font-family:'Bebas Neue',sans-serif;
+  font-size:1.4rem; letter-spacing:0.12em; color:var(--muted);
+  margin-bottom:8px;
+}
+.scan-hint {
+  font-size:0.6rem; color:var(--muted); line-height:1.8;
+  max-width:230px;
+}
+.scan-hint strong { color:var(--mode-c); transition: color 0.6s; }
+.scan-hint code {
+  display:inline-block; margin-top:12px;
+  font-size:0.55rem; padding:3px 8px;
+  border:1px solid var(--border); color:var(--muted);
+}
+
+/* WHISTLE PANEL */
+.whistle-panel { padding:14px 22px; gap:0; }
+
+.holes-wrap {
+  display:flex; justify-content:center;
+  gap:0; padding:10px 0;
+  flex-shrink:0;
+}
+.hand-group { display:flex; flex-direction:column; gap:8px; align-items:center; }
+.hand-divider {
+  width:1px; background:var(--border);
+  margin:0 14px; align-self:stretch;
+}
+.hole-btn {
+  width:52px; height:52px; border-radius:50%;
+  border:2px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Bebas Neue',sans-serif; font-size:1.2rem;
+  color:var(--muted);
+  transition: all 0.07s;
+  background: transparent;
+}
+.hole-btn.covered {
+  border-color:var(--mode-c);
+  background:color-mix(in srgb, var(--mode-c) 20%, transparent);
+  color:var(--mode-c);
+  box-shadow:0 0 14px color-mix(in srgb, var(--mode-c) 35%, transparent);
+}
+.hole-btn.hovering {
+  border-color:color-mix(in srgb, var(--mode-c) 55%, transparent);
+  color:color-mix(in srgb, var(--mode-c) 55%, transparent);
+  /* Depth fill grows from bottom as finger descends */
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--mode-c) 18%, transparent) var(--hole-depth, 0%),
+    transparent var(--hole-depth, 0%)
+  );
+}
+.hole-btn.open {
+  border-color:color-mix(in srgb, var(--mode-c) 25%, transparent);
+  color:color-mix(in srgb, var(--mode-c) 30%, transparent);
+}
+.hand-label {
+  font-size:0.48rem; letter-spacing:0.12em; text-transform:uppercase;
+  color:var(--muted); margin-top:2px;
+}
+
+/* TRUMPET PANEL */
+.trumpet-panel { padding:14px 22px; gap:0; }
+
+.valves-wrap {
+  display:flex; justify-content:center; gap:12px;
+  padding:10px 0; flex-shrink:0;
+}
+.valve-col { display:flex; flex-direction:column; align-items:center; gap:6px; }
+.valve-cap {
+  width:58px; height:58px; border-radius:50%;
+  border:2px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Bebas Neue',sans-serif; font-size:1.4rem;
+  color:var(--muted); transition:all 0.07s;
+}
+.valve-cap.hovering {
+  border-color:color-mix(in srgb, var(--mode-c) 50%, transparent);
+  color:color-mix(in srgb, var(--mode-c) 60%, transparent);
+  box-shadow:0 0 10px color-mix(in srgb, var(--mode-c) 20%, transparent);
+}
+.valve-cap.pressed {
+  border-color:var(--mode-c); color:var(--mode-c);
+  background:color-mix(in srgb, var(--mode-c) 15%, transparent);
+  box-shadow:0 0 20px color-mix(in srgb, var(--mode-c) 40%, transparent);
+  transform:translateY(3px);
+}
+.valve-stem {
+  width:7px; height:24px; background:var(--border);
+  border-radius:2px; transition:all 0.07s;
+}
+.valve-cap.pressed + .valve-stem {
+  height:17px; background:var(--mode-c);
+}
+.valve-label { font-size:0.48rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
+
+/* Depth meters */
+.depth-meters {
+  display:flex; gap:8px; padding:4px 0 10px;
+  flex-shrink:0;
+}
+.depth-col { flex:1; display:flex; flex-direction:column; gap:4px; }
+.depth-track {
+  height:48px; background:rgba(0,0,0,0.35);
+  border:1px solid var(--border); border-radius:2px;
+  position:relative; overflow:hidden;
+}
+.depth-fill {
+  position:absolute; bottom:0; left:0; right:0;
+  background:var(--mode-dim); border-top:2px solid var(--border);
+  transition: height 0.05s linear, border-color 0.1s, background 0.1s;
+}
+.depth-fill.hovering { background:color-mix(in srgb, var(--mode-c) 15%, transparent); border-color:color-mix(in srgb, var(--mode-c) 60%, transparent); }
+.depth-fill.pressed  { background:color-mix(in srgb, var(--mode-c) 25%, transparent); border-color:var(--mode-c); }
+.depth-th, .depth-pr {
+  position:absolute; left:0; right:0; height:1px;
+}
+.depth-th { top:30%; background:rgba(255,255,255,0.12); }
+.depth-pr { top:65%; background:rgba(255,255,255,0.2); }
+.depth-label { font-size:0.48rem; color:var(--muted); text-align:center; letter-spacing:0.1em; }
+
+/* SHARED: fingering chart */
+.chart-section { padding:10px 22px 14px; flex-shrink:0; }
+.chart-grid { display:grid; gap:5px; margin-top:8px; }
+.whistle .chart-grid  { grid-template-columns:repeat(4,1fr); }
+.trumpet .chart-grid  { grid-template-columns:repeat(2,1fr); }
+
+.chart-cell {
+  display:flex; align-items:center; gap:6px;
+  padding:6px 8px; border:1px solid var(--border);
+  border-radius:2px; transition:all 0.12s; cursor:default;
+}
+.chart-cell.lit {
+  border-color:var(--mode-c);
+  background:var(--mode-dim);
+}
+.chart-note {
+  font-family:'Bebas Neue',sans-serif;
+  font-size:1.1rem; color:var(--muted); line-height:1;
+  min-width:22px;
+}
+.chart-cell.lit .chart-note { color:var(--mode-c); }
+.mini-circles { display:flex; gap:2px; flex-wrap:wrap; max-width:40px; }
+.mc {
+  width:6px; height:6px; border-radius:50%;
+  border:1px solid var(--border); background:transparent;
+}
+.mc.filled { background:var(--muted); border-color:var(--muted); }
+.chart-cell.lit .mc { border-color:color-mix(in srgb, var(--mode-c) 50%, transparent); }
+.chart-cell.lit .mc.filled { background:var(--mode-c); border-color:var(--mode-c); }
+
+/* Manual rescan button */
+.rescan-btn {
+  font-family:'IBM Plex Mono',monospace;
+  font-size:0.55rem; letter-spacing:0.1em; text-transform:uppercase;
+  padding:5px 12px; cursor:pointer;
+  background:transparent; border:1px solid var(--border);
+  color:var(--muted); transition:all 0.2s; margin:10px auto 0;
+  display:block;
+}
+.rescan-btn:hover { border-color:var(--mode-c); color:var(--mode-c); }
+
+/* ── FOOTER ── */
+footer {
+  background:var(--surface); border-top:1px solid var(--border);
+  padding:0 20px; display:flex; align-items:center; gap:20px;
+  font-size:0.5rem; color:var(--muted); letter-spacing:0.08em;
+}
+.footer-mode { color:var(--mode-c); transition:var(--trans); }
+</style>
+</head>
+<body class="scanning">
+
+<header>
+  <div class="wordmark">CamInstrument</div>
+  <div class="mode-badge">
+    <div class="dot"></div>
+    <span id="modeBadgeText">SCANNING</span>
+  </div>
+  <div class="tags">
+    <div class="tag" id="tagCam">NO CAM</div>
+    <div class="tag" id="tagHand">NO HAND</div>
+    <div class="tag" id="tagFace">NO FACE</div>
+    <div class="tag" id="tagMic">NO MIC</div>
+    <div class="tag blow" id="tagBlow" style="display:none">BLOWING</div>
+  </div>
+</header>
+
+<main>
+  <!-- Camera -->
+  <div class="cam-wrap">
+    <video id="vid" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+    <div class="scan-line"></div>
+    <div class="conf-bar-wrap"><div class="conf-bar" id="confBar"></div></div>
+
+    <div class="cam-start" id="startScreen">
+      <div class="icon">🎵</div>
+      <p>Print a template and hold it up to your camera to begin.</p>
+      <button class="start-btn" onclick="startAll()">Enable Camera + Mic</button>
+    </div>
+  </div>
+
+  <!-- Panel -->
+  <div class="panel">
+
+    <!-- Note -->
+    <div class="note-display">
+      <div class="note-big silent" id="noteBig">—</div>
+      <div class="note-sub" id="noteSub">hold a template up to the camera</div>
+    </div>
+
+    <!-- Breath -->
+    <div class="breath-section">
+      <div class="sec-label">Breath</div>
+      <div class="breath-meters">
+        <div class="breath-row">
+          <span class="breath-row-label">MIC</span>
+          <div class="breath-track">
+            <div class="breath-fill" id="micFill"></div>
+          </div>
+        </div>
+        <div class="breath-row">
+          <span class="breath-row-label">VOICE</span>
+          <div class="breath-track">
+            <div class="breath-fill" id="voiceFill"></div>
+          </div>
+        </div>
+        <div class="breath-row">
+          <span class="breath-row-label">LIP</span>
+          <div class="breath-track apt-track">
+            <div class="apt-zone"></div>
+            <div class="breath-fill" id="lipFill"></div>
+          </div>
+        </div>
+        <div class="breath-row">
+          <span class="breath-row-label">DYN</span>
+          <div class="breath-track">
+            <div class="breath-fill" id="dynFill"></div>
+          </div>
+        </div>
+      </div>
+      <div class="breath-status" id="breathStatus">mic inactive</div>
+    </div>
+
+    <!-- Instrument area -->
+    <div class="instrument-area">
+
+      <!-- Scanning -->
+      <div class="mode-panel scan-panel active" id="panelScan">
+        <div class="scan-icon">◎</div>
+        <div class="scan-title">Awaiting Template</div>
+        <div class="scan-hint">
+          Hold your printed template up to the camera.<br><br>
+          <strong>Tin Whistle</strong> — 6 circles, vertical<br>
+          <strong>Trumpet</strong> — 3 circles, horizontal<br><br>
+          <code>SPACE to blow · 1 2 3 for valves · Q-D for whistle holes</code>
+          <div style="font-size:0.52rem;color:var(--muted);margin-top:10px;line-height:1.7">
+            Trigger with <strong style="color:var(--mode-c)">breath, singing or humming</strong>.<br>
+            Pitch always controlled by fingering.
+          </div>
+        </div>
+      </div>
+
+      <!-- Whistle -->
+      <div class="mode-panel whistle" id="panelWhistle">
+        <div style="padding:14px 22px 0">
+          <div class="sec-label">D Tin Whistle · Live Fingering</div>
+          <div class="holes-wrap">
+            <div class="hand-group">
+              <div class="hole-btn open" id="h0">1</div>
+              <div class="hole-btn open" id="h1">2</div>
+              <div class="hole-btn open" id="h2">3</div>
+              <div class="hand-label">Left</div>
+            </div>
+            <div class="hand-divider"></div>
+            <div class="hand-group">
+              <div class="hole-btn open" id="h3">4</div>
+              <div class="hole-btn open" id="h4">5</div>
+              <div class="hole-btn open" id="h5">6</div>
+              <div class="hand-label">Right</div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-section whistle">
+          <div class="sec-label">D Major Scale</div>
+          <div class="chart-grid" id="whistleChart"></div>
+        </div>
+        <button class="rescan-btn" onclick="requestRescan()">↺ Change instrument</button>
+      </div>
+
+      <!-- Trumpet -->
+      <div class="mode-panel trumpet" id="panelTrumpet">
+        <div style="padding:14px 22px 0">
+          <div class="sec-label">B♭ Trumpet · Hover + Press</div>
+          <div class="valves-wrap">
+            <div class="valve-col">
+              <div class="valve-cap" id="vc0">1</div>
+              <div class="valve-stem" id="vs0"></div>
+              <div class="valve-label">Valve 1</div>
+            </div>
+            <div class="valve-col">
+              <div class="valve-cap" id="vc1">2</div>
+              <div class="valve-stem" id="vs1"></div>
+              <div class="valve-label">Valve 2</div>
+            </div>
+            <div class="valve-col">
+              <div class="valve-cap" id="vc2">3</div>
+              <div class="valve-stem" id="vs2"></div>
+              <div class="valve-label">Valve 3</div>
+            </div>
+          </div>
+          <div class="depth-meters">
+            <div class="depth-col">
+              <div class="depth-track">
+                <div class="depth-fill" id="dm0"></div>
+                <div class="depth-th"></div><div class="depth-pr"></div>
+              </div>
+              <div class="depth-label">INDEX</div>
+            </div>
+            <div class="depth-col">
+              <div class="depth-track">
+                <div class="depth-fill" id="dm1"></div>
+                <div class="depth-th"></div><div class="depth-pr"></div>
+              </div>
+              <div class="depth-label">MIDDLE</div>
+            </div>
+            <div class="depth-col">
+              <div class="depth-track">
+                <div class="depth-fill" id="dm2"></div>
+                <div class="depth-th"></div><div class="depth-pr"></div>
+              </div>
+              <div class="depth-label">RING</div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-section trumpet">
+          <div class="sec-label">B♭ Trumpet · Fingerings</div>
+          <div class="chart-grid" id="trumpetChart"></div>
+        </div>
+        <button class="rescan-btn" onclick="requestRescan()">↺ Change instrument</button>
+      </div>
+
+    </div><!-- /instrument-area -->
+  </div><!-- /panel -->
+</main>
+
+<footer>
+  <span class="footer-mode" id="footerMode">SCANNING</span>
+  <span id="footerDetail">template detection · blob topology · mediapipe hands + face</span>
+</footer>
+
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════════
+// FINGERING TABLES
+// ════════════════════════════════════════════════════════
+
+// D Tin Whistle — holes[0..5], 1=covered 0=open
+const WHISTLE_NOTES = [
+  { name:'D',  oct:'4', freq:293.66, holes:[1,1,1,1,1,1] },
+  { name:'E',  oct:'4', freq:329.63, holes:[1,1,1,1,1,0] },
+  { name:'F♯', oct:'4', freq:369.99, holes:[1,1,1,1,0,0] },
+  { name:'G',  oct:'4', freq:392.00, holes:[1,1,1,0,0,0] },
+  { name:'A',  oct:'4', freq:440.00, holes:[1,1,0,0,0,0] },
+  { name:'B',  oct:'4', freq:493.88, holes:[1,0,0,0,0,0] },
+  { name:'C♯', oct:'5', freq:554.37, holes:[0,0,0,1,0,0] },
+  { name:'D',  oct:'5', freq:587.33, holes:[0,0,0,0,0,0] },
+];
+
+// Bb Trumpet — v[0..2], 1=pressed 0=open
+const TRUMPET_NOTES = [
+  { name:'B♭', oct:'4', freq:466.16, v:[0,0,0], label:'open'   },
+  { name:'A',  oct:'4', freq:440.00, v:[1,0,0], label:'1'      },
+  { name:'A♭', oct:'4', freq:415.30, v:[1,1,0], label:'1+2'    },
+  { name:'G',  oct:'4', freq:392.00, v:[0,0,1], label:'3'      },
+  { name:'G♭', oct:'4', freq:369.99, v:[0,1,1], label:'2+3'    },
+  { name:'F♯', oct:'4', freq:369.99, v:[1,0,1], label:'1+3'    },
+  { name:'F',  oct:'4', freq:349.23, v:[1,1,1], label:'1+2+3'  },
+  { name:'B',  oct:'4', freq:493.88, v:[0,1,0], label:'2'      },
+  { name:'C',  oct:'5', freq:523.25, v:[0,0,0], label:'open 3rd'},
+  { name:'D',  oct:'5', freq:587.33, v:[1,1,0], label:'1+2'    },
+  { name:'E♭', oct:'5', freq:622.25, v:[0,1,0], label:'2'      },
+  { name:'E',  oct:'5', freq:659.25, v:[1,0,0], label:'1'      },
+  { name:'F',  oct:'5', freq:698.46, v:[0,0,0], label:'open 5th'},
+];
+
+// ════════════════════════════════════════════════════════
+// BUILD CHARTS
+// ════════════════════════════════════════════════════════
+function buildWhistleChart() {
+  const el = document.getElementById('whistleChart');
+  WHISTLE_NOTES.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'chart-cell'; d.id = `wc${i}`;
+    d.innerHTML = `<span class="chart-note">${n.name}<sub style="font-size:.5rem">${n.oct}</sub></span>
+      <div class="mini-circles">${n.holes.map(h=>`<div class="mc ${h?'filled':''}"></div>`).join('')}</div>`;
+    el.appendChild(d);
+  });
+}
+function buildTrumpetChart() {
+  const el = document.getElementById('trumpetChart');
+  TRUMPET_NOTES.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'chart-cell'; d.id = `tc${i}`;
+    d.innerHTML = `<span class="chart-note">${n.name}<sub style="font-size:.5rem">${n.oct}</sub></span>
+      <div class="mini-circles">${n.v.map(h=>`<div class="mc ${h?'filled':''}"></div>`).join('')}</div>
+      <span style="font-size:.48rem;color:var(--muted);margin-left:auto">${n.label}</span>`;
+    el.appendChild(d);
+  });
+}
+buildWhistleChart();
+buildTrumpetChart();
+
+// ════════════════════════════════════════════════════════
+// MODE STATE
+// ════════════════════════════════════════════════════════
+let mode = 'scanning';    // 'scanning' | 'whistle' | 'trumpet'
+let modeConf = 0;         // consecutive frames matching same template
+let pendingMode = null;   // template detected but not yet locked
+const LOCK_FRAMES = 45;   // ~1.5s to lock
+let rescanRequested = false;
+
+// Whistle — z-depth per hole (same approach as trumpet, 2 hands)
+let holesCovered   = [false,false,false,false,false,false];
+const whistleDepth = [0,0,0,0,0,0];     // smoothed z-depth 0..1
+const whistleState = ['idle','idle','idle','idle','idle','idle'];
+const whistleVel   = [0,0,0,0,0,0];     // z velocity (delta per frame)
+const whistlePrevZ = [null,null,null,null,null,null]; // raw z last frame
+// Tap latch: once tapped, hold covered state for min dwell frames
+const TAP_DWELL    = 6;
+const tapHold      = [0,0,0,0,0,0];
+const WHISTLE_HOVER_T = 0.28;
+const WHISTLE_PRESS_T = 0.58;
+const TAP_VEL_T    = 0.045;  // z-velocity spike threshold for tap detection
+// Detected hole positions in frame (cx,cy,r) - set after template detection (visual guide only)
+let holePositions  = [];
+
+// Trumpet
+const fingerState  = ['idle','idle','idle'];
+const fingerDepth  = [0,0,0];
+const HOVER_T = 0.32;
+const PRESS_T = 0.62;
+
+// Breath / voice
+let micBlowing   = false;
+let lipBlowing   = false;
+let voiceGate    = false;   // singing / humming / speaking
+let isBlowing    = false;
+let lipAperture  = 0;
+let lipNarrow    = 0;
+let faceVisible  = false;
+let handVisible  = false;
+let smoothRms    = 0;
+let smoothVoiceRms = 0;
+let breathLevel  = 0;       // unified 0..1 amplitude driving dynamics (strongest source wins)
+
+// HNR autocorrelation — detect voiced/periodic sound
+// Returns correlation coefficient 0..1 at best lag; > HNR_THRESH = voiced
+const HNR_THRESH = 0.42;
+const HNR_MIN_FREQ = 80;   // Hz — below this = rumble/noise, not voice
+const HNR_MAX_FREQ = 1200; // Hz — above this = likely breath not voice
+
+function computeHNR(buf, sampleRate) {
+  const minLag = Math.floor(sampleRate / HNR_MAX_FREQ);
+  const maxLag = Math.floor(sampleRate / HNR_MIN_FREQ);
+  const n = buf.length;
+  let r0 = 0;
+  for (let i = 0; i < n; i++) r0 += buf[i] * buf[i];
+  if (r0 < 1e-8) return 0;
+  let bestR = 0;
+  for (let lag = minLag; lag <= Math.min(maxLag, n - 1); lag++) {
+    let r = 0, norm = 0;
+    for (let i = 0; i < n - lag; i++) {
+      r    += buf[i] * buf[i + lag];
+      norm += buf[i] * buf[i] + buf[i + lag] * buf[i + lag];
+    }
+    const rNorm = norm > 0 ? (2 * r) / norm : 0;
+    if (rNorm > bestR) bestR = rNorm;
+  }
+  return bestR; // 0=noise/breath, 1=pure periodic tone
+}
+
+// Audio
+let audioCtx   = null;
+let activeTone = null;
+let currentFreq = null;
+
+// ════════════════════════════════════════════════════════
+// TEMPLATE DETECTION — blob topology
+// ════════════════════════════════════════════════════════
+const GRID_COLS = 48;
+const GRID_ROWS = 28;
+const VAR_THRESHOLD = 420; // tune as needed
+
+function computeGridVariances(imageData, w, h) {
+  const cw = Math.floor(w / GRID_COLS);
+  const ch = Math.floor(h / GRID_ROWS);
+  const hot = [];
+
+  for (let gy = 0; gy < GRID_ROWS; gy++) {
+    for (let gx = 0; gx < GRID_COLS; gx++) {
+      const x0 = gx * cw, y0 = gy * ch;
+      // sample NxN inside the cell
+      let sum = 0, sq = 0, n = 0;
+      for (let sy = 0; sy < ch; sy += 2) {
+        for (let sx = 0; sx < cw; sx += 2) {
+          const idx = ((y0+sy)*w + (x0+sx)) * 4;
+          const lum = 0.299*imageData.data[idx] + 0.587*imageData.data[idx+1] + 0.114*imageData.data[idx+2];
+          sum += lum; sq += lum*lum; n++;
+        }
+      }
+      const mean = sum/n;
+      const variance = sq/n - mean*mean;
+      if (variance > VAR_THRESHOLD) {
+        hot.push({ gx, gy, cx: x0+cw/2, cy: y0+ch/2 });
+      }
+    }
+  }
+  return hot;
+}
+
+function clusterBlobs(hotCells) {
+  // simple union-find via adjacency
+  const cellSet = new Set(hotCells.map(c => c.gy * GRID_COLS + c.gx));
+  const visited = new Set();
+  const blobs = [];
+
+  for (const cell of hotCells) {
+    const key = cell.gy * GRID_COLS + cell.gx;
+    if (visited.has(key)) continue;
+    // BFS
+    const queue = [cell];
+    const blob = [];
+    visited.add(key);
+    while (queue.length) {
+      const cur = queue.shift();
+      blob.push(cur);
+      // check 4-neighbours + diagonals
+      for (let dy=-1; dy<=1; dy++) {
+        for (let dx=-1; dx<=1; dx++) {
+          if (dx===0&&dy===0) continue;
+          const nk = (cur.gy+dy)*GRID_COLS + (cur.gx+dx);
+          if (!visited.has(nk) && cellSet.has(nk)) {
+            visited.add(nk);
+            const nc = hotCells.find(c => c.gy*GRID_COLS+c.gx===nk);
+            if (nc) queue.push(nc);
+          }
+        }
+      }
+    }
+    if (blob.length >= 2) { // minimum blob size (filter noise)
+      const cx = blob.reduce((s,c)=>s+c.cx,0)/blob.length;
+      const cy = blob.reduce((s,c)=>s+c.cy,0)/blob.length;
+      blobs.push({ cx, cy, size: blob.length });
+    }
+  }
+  return blobs;
+}
+
+function detectTemplate(imageData, w, h) {
+  const hot   = computeGridVariances(imageData, w, h);
+  const blobs = clusterBlobs(hot);
+
+  // Filter out very small or very large blobs
+  const valid = blobs.filter(b => b.size >= 3 && b.size <= 80);
+  if (valid.length < 3 || valid.length > 8) return null;
+
+  const xs = valid.map(b=>b.cx), ys = valid.map(b=>b.cy);
+  const xRange = Math.max(...xs) - Math.min(...xs);
+  const yRange = Math.max(...ys) - Math.min(...ys);
+  const minSpan = Math.min(w,h) * 0.08; // blobs must be spread out enough
+
+  if (valid.length === 6 && yRange > xRange * 1.5 && yRange > minSpan) {
+    // Sort top-to-bottom
+    const sorted = [...valid].sort((a,b)=>a.cy-b.cy);
+    return { template: 'whistle', blobs: sorted };
+  }
+  if (valid.length === 3 && xRange > yRange * 1.5 && xRange > minSpan) {
+    const sorted = [...valid].sort((a,b)=>a.cx-b.cx);
+    return { template: 'trumpet', blobs: sorted };
+  }
+  return null;
+}
+
+// ════════════════════════════════════════════════════════
+// WHISTLE DETECTION
+// ════════════════════════════════════════════════════════
+// (variance occlusion functions removed — whistle now uses Z-depth via MediaPipe Hands)
+
+// ════════════════════════════════════════════════════════
+// VISION LOOP
+// ════════════════════════════════════════════════════════
+let analysisCanvas, actx, overlayCanvas, octx, vid;
+let visionRunning = false;
+
+function startVisionLoop() {
+  visionRunning = true;
+  function frame() {
+    if (!visionRunning) return;
+    const w = overlayCanvas.width, h = overlayCanvas.height;
+    if (vid.readyState < 2 || !w) { requestAnimationFrame(frame); return; }
+
+    // Capture (note: video is CSS-mirrored; we draw un-mirrored to analysis canvas)
+    actx.save(); actx.scale(-1,1); actx.drawImage(vid,-w,0,w,h); actx.restore();
+    const imageData = actx.getImageData(0,0,w,h);
+
+    // Clear overlay
+    octx.clearRect(0,0,w,h);
+
+    if (mode === 'scanning' || rescanRequested) {
+      runTemplateDetection(imageData, w, h);
+    }
+    // Whistle and trumpet hole/valve detection now both handled
+    // entirely by onHandResults (MediaPipe Z-depth callback).
+    // Vision loop only handles: template detection + whistle overlay drawing.
+    if (mode === 'whistle') {
+      drawWhistleOverlay(w, h);
+    }
+    // Trumpet detection is event-driven via MediaPipe Hands callback
+    // but we still draw overlay here
+    if (mode === 'trumpet') {
+      drawTrumpetOverlay(w, h);
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function runTemplateDetection(imageData, w, h) {
+  const result = detectTemplate(imageData, w, h);
+
+  if (result && result.template === pendingMode) {
+    modeConf++;
+  } else if (result) {
+    pendingMode = result.template;
+    modeConf = 1;
+    // Store blobs for use when locking
+    pendingBlobs = result.blobs;
+  } else {
+    modeConf = Math.max(0, modeConf - 1);
+  }
+
+  const pct = Math.min(100, (modeConf / LOCK_FRAMES) * 100);
+  document.getElementById('confBar').style.width = pct + '%';
+
+  if (modeConf >= LOCK_FRAMES && pendingMode) {
+    lockMode(pendingMode, pendingBlobs, imageData, w, h);
+    rescanRequested = false;
+    return;
+  }
+
+  // Draw detection overlay
+  if (pendingMode && modeConf > 5) {
+    drawDetectionOverlay(imageData, w, h, pendingMode);
+  }
+}
+
+let pendingBlobs = [];
+
+function lockMode(newMode, blobs, imageData, w, h) {
+  mode = newMode;
+  modeConf = 0;
+  pendingMode = null;
+
+  if (newMode === 'whistle') {
+    // Blob positions used only for visual overlay guides, not detection
+    const r = Math.min(w, h) * 0.045;
+    holePositions = blobs.map(b => ({ cx: b.cx, cy: b.cy, r }));
+    // Reset whistle finger state
+    for(let i=0;i<6;i++){
+      whistleDepth[i]=0; whistleState[i]='idle';
+      tapHold[i]=0; whistlePrevZ[i]=null;
+      holesCovered[i]=false;
+    }
+  }
+
+  setBodyMode(newMode);
+  showPanel(newMode);
+  updateModeUI(newMode);
+}
+
+function requestRescan() {
+  mode = 'scanning';
+  rescanRequested = true;
+  modeConf = 0;
+  pendingMode = null;
+  holePositions = [];
+  varBaseline = new Array(6).fill(null);
+  setBodyMode('scanning');
+  showPanel('scanning');
+  updateModeUI('scanning');
+  stopNote();
+}
+
+// ════════════════════════════════════════════════════════
+// MEDIAPIPE HANDS (Trumpet detection)
+// ════════════════════════════════════════════════════════
+let handsModel, faceMeshModel, mpCamera;
+const TIP_IDS = [8,12,16]; // index, middle, ring
+const MCP_IDS = [5,9,13];
+
+function initMediaPipe(videoEl) {
+  handsModel = new Hands({
+    locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`
+  });
+  handsModel.setOptions({ maxNumHands:2, modelComplexity:1,
+    minDetectionConfidence:0.65, minTrackingConfidence:0.6 });
+  handsModel.onResults(onHandResults);
+
+  try {
+    faceMeshModel = new FaceMesh({
+      locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`
+    });
+    faceMeshModel.setOptions({ maxNumFaces:1, refineLandmarks:true,
+      minDetectionConfidence:0.6, minTrackingConfidence:0.5 });
+    faceMeshModel.onResults(onFaceResults);
+  } catch(e) { console.warn('FaceMesh unavailable', e); }
+
+  mpCamera = new Camera(videoEl, {
+    onFrame: async () => {
+      await handsModel.send({ image: videoEl });
+      if (faceMeshModel) await faceMeshModel.send({ image: videoEl });
+    },
+    width:1280, height:720
+  });
+  mpCamera.start();
+}
+
+function onHandResults(results) {
+  handVisible = !!(results.multiHandLandmarks?.length);
+  setTag('tagHand', handVisible ? (results.multiHandLandmarks.length===2?'2 HANDS':'HAND'):'NO HAND', handVisible?'on':'');
+
+  const W = overlayCanvas.width, H = overlayCanvas.height;
+
+  if (mode === 'trumpet') {
+    if (!handVisible) { for(let i=0;i<3;i++) setFingerState(i,'idle'); updateNote(); return; }
+    // Use first detected hand for trumpet
+    const lm = results.multiHandLandmarks[0];
+    for (let i=0; i<3; i++) {
+      const tip=lm[TIP_IDS[i]], mcp=lm[MCP_IDS[i]];
+      const raw=Math.max(0,Math.min(1,(-(tip.z-mcp.z)+0.02)/0.08));
+      fingerDepth[i]=fingerDepth[i]*0.7+raw*0.3;
+      const d=fingerDepth[i];
+      setFingerState(i, d<HOVER_T?'idle':d<PRESS_T?'hovering':'pressed');
+    }
+    updateNote();
+    drawHandOnOverlay(octx,W,H,results.multiHandLandmarks[0], undefined);
+
+  } else if (mode === 'whistle') {
+    if (!handVisible) {
+      // All fingers lifted — clear all holes
+      for(let i=0;i<6;i++) setWhistleFingerState(i,'idle',0);
+      updateWhistleHoles(); updateNote(); return;
+    }
+
+    // Assign hands: MediaPipe returns handedness per detected hand.
+    // multiHandedness[n].label is 'Left' or 'Right' (from model's perspective = mirrored)
+    // In a front-facing (selfie) camera:
+    //   model 'Right' = user's LEFT hand  (holes 1-3, top)
+    //   model 'Left'  = user's RIGHT hand (holes 4-6, bottom)
+    const handData = results.multiHandLandmarks.map((lm,idx)=>({
+      lm, label: results.multiHandedness?.[idx]?.label || 'Right'
+    }));
+
+    // Slot hands: holes 0-2 from user's left (model Right), holes 3-5 from user's right (model Left)
+    const leftHandData  = handData.find(h=>h.label==='Right'); // user left
+    const rightHandData = handData.find(h=>h.label==='Left');  // user right
+
+    // Process each hand's 3 fingers → 3 holes
+    processWhistleHand(leftHandData?.lm  || null, 0); // holes 0,1,2
+    processWhistleHand(rightHandData?.lm || null, 3); // holes 3,4,5
+
+    updateWhistleHoles();
+    updateNote();
+
+    // Draw both hand skeletons with correct hole offset labels
+    if (leftHandData?.lm)  drawHandOnOverlay(octx,W,H,leftHandData.lm,  0);
+    if (rightHandData?.lm) drawHandOnOverlay(octx,W,H,rightHandData.lm, 3);
+  }
+}
+
+function processWhistleHand(lm, holeOffset) {
+  for (let i=0; i<3; i++) {
+    const hi = holeOffset + i; // hole index 0..5
+
+    if (!lm) {
+      // Hand not visible — fingers lifted, hole open
+      setWhistleFingerState(hi, 'idle', 0);
+      tapHold[hi] = 0;
+      whistlePrevZ[hi] = null;
+      continue;
+    }
+
+    const tip = lm[TIP_IDS[i]], mcp = lm[MCP_IDS[i]];
+    const zDiff = tip.z - mcp.z;
+    const raw = Math.max(0, Math.min(1, (-zDiff + 0.02) / 0.08));
+
+    // Velocity: how fast is finger moving downward this frame?
+    const prevRaw = whistlePrevZ[hi];
+    const vel = prevRaw !== null ? raw - prevRaw : 0;
+    whistleVel[hi] = vel;
+    whistlePrevZ[hi] = raw;
+
+    // Smooth depth (lighter smoothing for whistle → faster response)
+    whistleDepth[hi] = whistleDepth[hi]*0.6 + raw*0.4;
+    const d = whistleDepth[hi];
+
+    // Tap detection: sharp downward velocity spike = immediate press
+    const tapped = vel > TAP_VEL_T;
+
+    if (tapped || d >= WHISTLE_PRESS_T) {
+      // Press — latch for dwell frames to avoid flicker
+      tapHold[hi] = TAP_DWELL;
+    } else if (tapHold[hi] > 0) {
+      tapHold[hi]--;
+    }
+
+    const state = d < WHISTLE_HOVER_T ? 'idle' :
+                  tapHold[hi] > 0     ? 'pressed' :
+                  d < WHISTLE_PRESS_T ? 'hovering' : 'pressed';
+
+    setWhistleFingerState(hi, state, d);
+  }
+}
+
+function updateWhistleHoles() {
+  for(let i=0;i<6;i++) holesCovered[i] = whistleState[i]==='pressed';
+}
+
+function onFaceResults(results) {
+  faceVisible = !!(results.multiFaceLandmarks?.length);
+  setTag('tagFace', faceVisible ? 'FACE':'NO FACE', faceVisible?'on':'');
+  if (!faceVisible) { lipBlowing=false; lipAperture=0; updateBreathUI(); return; }
+
+  const lm = results.multiFaceLandmarks[0];
+  const W = overlayCanvas.width, H = overlayCanvas.height;
+
+  function dist(a,b) {
+    return Math.sqrt(((a.x-b.x)*W)**2 + ((a.y-b.y)*H)**2);
+  }
+  const aperture = dist(lm[13],lm[14]);
+  const width    = dist(lm[61],lm[291]);
+  const faceH    = dist(lm[168],lm[152]);
+  if (!faceH) return;
+
+  const rawApt = aperture / faceH;
+  lipAperture = lipAperture*0.75 + rawApt*0.25;
+  lipNarrow   = 1 - (width / (faceH * 0.7));
+
+  const inRange = lipAperture > 0.005 && lipAperture < 0.045;
+  lipBlowing = inRange && lipNarrow > 0.12;
+
+  updateBreathFusion();
+  updateBreathUI();
+}
+
+// ════════════════════════════════════════════════════════
+// BREATH DETECTION (Mic + AEC)
+// ════════════════════════════════════════════════════════
+function startMic() {
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation:true, noiseSuppression:false, autoGainControl:false }
+  }).then(stream => {
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(stream);
+
+    // Larger FFT for HNR autocorrelation (need time-domain samples covering ~20ms at 80Hz)
+    const an = audioCtx.createAnalyser();
+    an.fftSize = 2048;
+    an.smoothingTimeConstant = 0.45;
+    src.connect(an);
+
+    setTag('tagMic','MIC ON','on');
+
+    const tBuf = new Float32Array(an.fftSize);
+    const fBuf = new Float32Array(an.frequencyBinCount);
+    const SR   = audioCtx.sampleRate;
+
+    function tick() {
+      an.getFloatTimeDomainData(tBuf);
+      an.getFloatFrequencyData(fBuf);
+
+      // ── RMS ──
+      let ss = 0;
+      for (let i = 0; i < tBuf.length; i++) ss += tBuf[i]*tBuf[i];
+      const rms = Math.sqrt(ss / tBuf.length);
+      smoothRms = smoothRms*0.82 + rms*0.18;
+
+      // ── Spectral flatness (breath detection) ──
+      let gs=0, as=0, c=0;
+      for (let i=4; i<fBuf.length*0.7; i++) {
+        const lin = Math.pow(10, fBuf[i]/20);
+        gs += Math.log(lin+1e-10); as += lin; c++;
+      }
+      const flat = Math.exp(gs/c) / (as/c + 1e-10);
+      const BREATH_T = 0.022;
+      micBlowing = smoothRms > BREATH_T && (flat > 0.06 || smoothRms > BREATH_T*2.2);
+
+      // ── HNR — voice/singing detection ──
+      // Use a 512-sample window centred in the buffer for speed
+      const hnrWindow = tBuf.slice(768, 1280); // 512 samples ~11ms at 44.1kHz
+      const hnr = computeHNR(hnrWindow, SR);
+      const VOICE_RMS_T = 0.015; // lower than breath — singing is easier to detect
+      smoothVoiceRms = smoothVoiceRms*0.75 + rms*0.25;
+      voiceGate = hnr > HNR_THRESH && smoothVoiceRms > VOICE_RMS_T;
+
+      // ── Unified breathLevel: strongest active source → dynamics ──
+      // Breath source gets its raw RMS; voice gets its RMS too.
+      // Both normalised against their expected loudest value.
+      const breathNorm = Math.min(1, smoothRms / 0.12);
+      const voiceNorm  = Math.min(1, smoothVoiceRms / 0.08);
+      const newLevel   = (micBlowing || voiceGate)
+        ? Math.max(breathNorm, voiceGate ? voiceNorm : 0)
+        : 0;
+      // Smooth level changes to avoid gain zipper noise
+      breathLevel = breathLevel * 0.88 + newLevel * 0.12;
+
+      updateBreathFusion();
+      updateBreathUI();
+      requestAnimationFrame(tick);
+    }
+    tick();
+  }).catch(()=>{
+    setTag('tagMic','NO MIC','');
+    document.getElementById('breathStatus').textContent='no mic · hold SPACE to play';
+  });
+}
+
+function updateBreathFusion() {
+  const fused = micBlowing || lipBlowing || voiceGate;
+  if (fused !== isBlowing) {
+    isBlowing = fused;
+    document.getElementById('tagBlow').style.display = isBlowing ? 'inline-block':'none';
+    if (!isBlowing) {
+      breathLevel = 0;
+      stopNote();
+    } else {
+      updateNote();
+    }
+  }
+  // Push dynamics update on every tick while active
+  if (isBlowing) applyDynamics();
+}
+
+function updateBreathUI() {
+  const micPct   = Math.min(100, smoothRms / 0.12 * 100);
+  const voicePct = Math.min(100, smoothVoiceRms / 0.08 * 100);
+  const lipPct   = Math.min(100, (lipAperture / 0.08) * 100);
+  const dynPct   = Math.round(breathLevel * 100);
+  document.getElementById('micFill').style.width   = micPct   + '%';
+  document.getElementById('voiceFill').style.width = voicePct + '%';
+  document.getElementById('lipFill').style.width   = lipPct   + '%';
+  document.getElementById('dynFill').style.width   = dynPct   + '%';
+
+  const src = [];
+  if (micBlowing) src.push('breath');
+  if (voiceGate)  src.push('voice');
+  if (lipBlowing) src.push('lip');
+  const bs = document.getElementById('breathStatus');
+  if (isBlowing) {
+    bs.textContent = `● ${src.join(' + ')}  ·  ${dynPct}% dynamics`;
+  } else {
+    bs.textContent = (smoothRms < 0.004 && smoothVoiceRms < 0.004)
+      ? 'silence · blow, sing or hum to play'
+      : 'below threshold';
+  }
+  bs.className = 'breath-status' + (isBlowing ? ' blowing' : '');
+}
+
+// ════════════════════════════════════════════════════════
+// NOTE MATCHING + INSTRUMENT UI
+// ════════════════════════════════════════════════════════
+function updateWhistleUI() {
+  // Hole buttons are updated live in setWhistleFingerState.
+  // Just sync chart highlighting here.
+  WHISTLE_NOTES.forEach((n,i)=>{ document.getElementById(`wc${i}`).className='chart-cell'; });
+}
+
+function setFingerState(i, state) {
+  fingerState[i]=state;
+  const cap=document.getElementById(`vc${i}`);
+  const dm=document.getElementById(`dm${i}`);
+  if(cap) cap.className='valve-cap '+state;
+  if(dm)  { dm.className='depth-fill '+state; dm.style.height=Math.round(fingerDepth[i]*100)+'%'; }
+}
+
+function setWhistleFingerState(i, state, depth) {
+  whistleState[i] = state;
+  const el = document.getElementById(`h${i}`);
+  if (!el) return;
+  // Map state to hole visual class
+  if (state === 'pressed')  el.className = 'hole-btn covered';
+  else if (state === 'hovering') el.className = 'hole-btn hovering';
+  else el.className = 'hole-btn open';
+  // Show depth as subtle fill inside hole button via inline style
+  el.style.setProperty('--hole-depth', Math.round(depth*100)+'%');
+}
+
+function updateNote() {
+  let matched=null;
+  if (mode==='whistle') {
+    const cov=holesCovered.map(c=>c?1:0);
+    for(const n of WHISTLE_NOTES) {
+      if(n.holes.every((h,i)=>h===cov[i])){ matched=n; break; }
+    }
+    WHISTLE_NOTES.forEach((n,i)=>{
+      document.getElementById(`wc${i}`).className='chart-cell'+(matched===n?' lit':'');
+    });
+  } else if (mode==='trumpet') {
+    const pressed=fingerState.map(s=>s==='pressed'?1:0);
+    for(const n of TRUMPET_NOTES) {
+      if(n.v.every((h,i)=>h===pressed[i])){ matched=n; break; }
+    }
+    TRUMPET_NOTES.forEach((n,i)=>{
+      document.getElementById(`tc${i}`).className='chart-cell'+(matched===n?' lit':'');
+    });
+  }
+
+  const noteBig=document.getElementById('noteBig');
+  const noteSub=document.getElementById('noteSub');
+
+  if (matched && isBlowing) {
+    noteBig.textContent=matched.name;
+    noteBig.className='note-big playing';
+    noteSub.textContent=`${matched.freq.toFixed(1)} Hz`;
+    playNote(matched.freq);
+  } else if (matched) {
+    noteBig.textContent=matched.name;
+    noteBig.className='note-big silent';
+    noteSub.textContent='fingering ready · blow to sound';
+    stopNote();
+  } else {
+    noteBig.textContent='—';
+    noteBig.className='note-big silent';
+    noteSub.textContent= mode==='scanning' ? 'hold a template up to the camera' :
+                         isBlowing ? 'unknown fingering' : 'finger a position & blow';
+    stopNote();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// AUDIO SYNTHESIS
+// ════════════════════════════════════════════════════════
+// References to live-updateable nodes in the active tone
+let dynGain   = null;  // GainNode — master volume
+let dynFilter = null;  // BiquadFilter — timbre brightness
+
+function buildTone(freq, type) {
+  if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  // Dynamics chain: oscillators → dynFilter → dynGain → destination
+  dynFilter = audioCtx.createBiquadFilter();
+  dynFilter.type = 'lowpass';
+  dynFilter.Q.value = 0.9;
+
+  dynGain = audioCtx.createGain();
+  dynGain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+
+  dynFilter.connect(dynGain);
+  dynGain.connect(audioCtx.destination);
+
+  let oscs = [];
+
+  if (type === 'whistle') {
+    // Fundamental-heavy harmonic stack (brightness added by filter opening)
+    const harmonics = [{n:1,g:0.55},{n:2,g:0.22},{n:3,g:0.09},{n:4,g:0.04}];
+    oscs = harmonics.map(({n,g}) => {
+      const o  = audioCtx.createOscillator();
+      const og = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = freq * n; og.gain.value = g;
+      o.connect(og); og.connect(dynFilter); o.start(); return o;
+    });
+    // Fixed breath noise layer (quiet, not dynamics-driven — texture only)
+    const buf  = audioCtx.createBuffer(1, audioCtx.sampleRate*0.4, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i=0; i<data.length; i++) data[i] = Math.random()*2-1;
+    const ns = audioCtx.createBufferSource(); ns.buffer = buf; ns.loop = true;
+    const nf = audioCtx.createBiquadFilter(); nf.type='bandpass';
+    nf.frequency.value = freq*2.2; nf.Q.value = 0.7;
+    const ng = audioCtx.createGain(); ng.gain.value = 0.04;
+    ns.connect(nf); nf.connect(ng); ng.connect(dynGain); ns.start();
+
+  } else {
+    // Trumpet: sawtooth gives natural harmonic series
+    const harmonics = [{n:1,g:0.45},{n:2,g:0.30},{n:3,g:0.16},{n:4,g:0.09},{n:5,g:0.05},{n:6,g:0.03}];
+    oscs = harmonics.map(({n,g}) => {
+      const o  = audioCtx.createOscillator();
+      const og = audioCtx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = freq * n; og.gain.value = g;
+      o.connect(og); og.connect(dynFilter); o.start(); return o;
+    });
+  }
+
+  // Attack ramp — initial values set by applyDynamics on next tick
+  dynGain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.02);
+
+  return { oscs, master: dynGain };
+}
+
+function applyDynamics() {
+  if (!dynGain || !dynFilter || !audioCtx) return;
+
+  const level = breathLevel;  // 0..1, already smoothed
+
+  // ── Gain ──
+  // Map level → perceptual gain with a slight curve (louder = more headroom)
+  const targetGain = 0.08 + level * 0.52;  // range: 0.08 (pp) to 0.60 (ff)
+  dynGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.04);
+
+  // ── Filter cutoff → timbre brightness ──
+  // Whistle: pp=1.5× fundamental (dark/flute), ff=8× (bright/overblown)
+  // Trumpet: pp=2× fundamental (dark/muted), ff=12× (open/bright)
+  if (!currentFreq) return;
+  const softMult = mode === 'whistle' ? 1.5 : 2.0;
+  const hardMult = mode === 'whistle' ? 8.0 : 12.0;
+  const cutoff = currentFreq * (softMult + (hardMult - softMult) * Math.pow(level, 1.4));
+  dynFilter.frequency.setTargetAtTime(
+    Math.min(cutoff, audioCtx.sampleRate * 0.45),
+    audioCtx.currentTime, 0.06
+  );
+}
+
+function playNote(freq) {
+  if (currentFreq === freq) return;
+  const prevLevel = breathLevel; // preserve level across note changes
+  stopNote(true);  // silent stop — don't zero breathLevel
+  activeTone  = buildTone(freq, mode);
+  currentFreq = freq;
+  breathLevel = prevLevel;
+  applyDynamics(); // set gain/filter immediately to current level
+}
+
+function stopNote(silent = false) {
+  if (!activeTone) return;
+  const { oscs, master } = activeTone;
+  master.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.04);
+  setTimeout(() => oscs.forEach(o => { try { o.stop(); } catch(e){} }), 200);
+  activeTone  = null;
+  currentFreq = null;
+  dynGain     = null;
+  dynFilter   = null;
+  if (!silent) breathLevel = 0;
+}
+
+// ════════════════════════════════════════════════════════
+// OVERLAY DRAWING
+// ════════════════════════════════════════════════════════
+function drawDetectionOverlay(imageData, w, h, template) {
+  octx.clearRect(0,0,w,h);
+  const hot=computeGridVariances(imageData,w,h);
+  const blobs=clusterBlobs(hot);
+  const valid=blobs.filter(b=>b.size>=3&&b.size<=80);
+
+  // Draw blob centroids
+  valid.forEach(b=>{
+    octx.beginPath();
+    octx.arc(w-b.cx,b.cy,18,0,Math.PI*2); // mirror x
+    octx.strokeStyle=`rgba(90,122,255,0.5)`;
+    octx.lineWidth=1.5; octx.setLineDash([3,3]);
+    octx.stroke(); octx.setLineDash([]);
+  });
+
+  // Mode label
+  octx.fillStyle='rgba(90,122,255,0.7)';
+  octx.font='600 12px IBM Plex Mono, monospace';
+  octx.textAlign='left';
+  octx.fillText(`${template?.toUpperCase()||'?'} · ${Math.round(modeConf/LOCK_FRAMES*100)}%`, 16, h-12);
+}
+
+function drawWhistleOverlay(w, h) {
+  // Draw template guide circles (visual reference only)
+  holePositions.forEach((pos, i) => {
+    const state = whistleState[i];
+    const mx = w - pos.cx; // mirror x
+    const depth = whistleDepth[i];
+
+    // Guide ring — dims out when finger is pressing (finger landmark takes over visually)
+    const baseAlpha = state === 'pressed' ? 0.15 : state === 'hovering' ? 0.45 : 0.25;
+    octx.beginPath(); octx.arc(mx, pos.cy, pos.r + 3, 0, Math.PI*2);
+    octx.strokeStyle = `rgba(72,232,154,${baseAlpha})`;
+    octx.lineWidth = 1.5; octx.setLineDash([3,4]); octx.stroke(); octx.setLineDash([]);
+
+    // Depth fill inside guide circle — grows as finger descends
+    if (depth > 0.05) {
+      const fillR = pos.r * Math.min(1, (depth - 0.05) / 0.55);
+      octx.beginPath(); octx.arc(mx, pos.cy, fillR, 0, Math.PI*2);
+      const fillAlpha = state === 'pressed' ? 0.35 : 0.15;
+      octx.fillStyle = `rgba(72,232,154,${fillAlpha})`; octx.fill();
+    }
+
+    // Hole number
+    octx.fillStyle = state === 'pressed' ? 'rgba(72,232,154,0.9)' : `rgba(72,232,154,${baseAlpha+0.1})`;
+    octx.font = `600 ${Math.round(pos.r*0.55)}px Bebas Neue, sans-serif`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    octx.fillText(i + 1, mx, pos.cy);
+
+    // Tap flash — brief bright ring on press moment
+    if (state === 'pressed' && tapHold[i] >= TAP_DWELL - 2) {
+      octx.beginPath(); octx.arc(mx, pos.cy, pos.r + 8, 0, Math.PI*2);
+      octx.strokeStyle = 'rgba(72,232,154,0.6)';
+      octx.lineWidth = 2; octx.stroke();
+    }
+  });
+
+  // Global breath glow
+  if (isBlowing && holePositions.length >= 3) {
+    const mid = holePositions[2];
+    const grd = octx.createRadialGradient(w-mid.cx, mid.cy, 0, w-mid.cx, mid.cy, h*0.4);
+    grd.addColorStop(0,'rgba(72,232,154,0.06)');
+    grd.addColorStop(1,'rgba(72,232,154,0)');
+    octx.fillStyle = grd; octx.fillRect(0,0,w,h);
+  }
+}
+
+function drawTrumpetOverlay(w, h) {
+  // Target circles at lower centre
+  const gap=w*0.1, cy=h*0.74, r=w*0.055;
+  const centres=[{x:w/2-gap,y:cy},{x:w/2,y:cy},{x:w/2+gap,y:cy}];
+  centres.forEach((c,i)=>{
+    const state=fingerState[i];
+    const alpha=state==='idle'?0.18:state==='hovering'?0.5:0.9;
+    octx.beginPath(); octx.arc(c.x,c.y,r,0,Math.PI*2);
+    octx.strokeStyle=`rgba(240,184,64,${alpha})`;
+    octx.lineWidth=1.5; octx.setLineDash([4,4]); octx.stroke(); octx.setLineDash([]);
+    if(state==='pressed'){
+      octx.beginPath(); octx.arc(c.x,c.y,r*0.45,0,Math.PI*2);
+      octx.fillStyle='rgba(240,184,64,0.12)'; octx.fill();
+    }
+    octx.fillStyle=`rgba(240,184,64,${alpha*0.8})`;
+    octx.font='600 11px IBM Plex Mono,monospace';
+    octx.textAlign='center'; octx.textBaseline='middle';
+    octx.fillText(i+1,c.x,c.y);
+  });
+}
+
+function drawHandOnOverlay(ctx, W, H, lm, holeOffsetForWhistle) {
+  function pt(l){ return {x:W-l.x*W, y:l.y*H}; }
+  const isWhistle = mode === 'whistle';
+  const skeletonAlpha = isWhistle ? 0.15 : 0.2;
+
+  // Skeleton
+  const pairs=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+               [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+               [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+  const skelColor = isWhistle ? `rgba(72,232,154,${skeletonAlpha})` : `rgba(240,184,64,${skeletonAlpha})`;
+  ctx.strokeStyle = skelColor; ctx.lineWidth = 1;
+  pairs.forEach(([a,b])=>{
+    const pa=pt(lm[a]),pb=pt(lm[b]);
+    ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+  });
+
+  // Fingertips for the 3 active fingers
+  TIP_IDS.forEach((tid,i)=>{
+    const p = pt(lm[tid]);
+    let state, depth;
+
+    if (isWhistle && holeOffsetForWhistle !== undefined) {
+      const hi = holeOffsetForWhistle + i;
+      state = whistleState[hi];
+      depth = whistleDepth[hi];
+    } else {
+      state = fingerState[i];
+      depth = fingerDepth[i];
+    }
+
+    const pressed  = state === 'pressed';
+    const hovering = state === 'hovering';
+    const r = isWhistle ? (10 + depth*10) : (12 + depth*6);
+
+    let col;
+    if (isWhistle) {
+      col = pressed  ? 'rgba(72,232,154,1.0)' :
+            hovering ? 'rgba(72,232,154,0.65)' : 'rgba(72,232,154,0.3)';
+    } else {
+      col = pressed  ? 'rgba(240,184,64,1.0)' :
+            hovering ? 'rgba(180,130,40,0.85)' : 'rgba(80,60,20,0.6)';
+    }
+
+    // Glow for pressed
+    if (pressed) {
+      const grd = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r*2.2);
+      const gc = isWhistle ? 'rgba(72,232,154,' : 'rgba(240,184,64,';
+      grd.addColorStop(0, gc+'0.3)'); grd.addColorStop(1, gc+'0)');
+      ctx.fillStyle=grd; ctx.fillRect(p.x-r*3,p.y-r*3,r*6,r*6);
+    }
+
+    ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
+    ctx.strokeStyle=col; ctx.lineWidth=pressed?2.5:1.5; ctx.stroke();
+    ctx.fillStyle=col;
+    ctx.font=`600 ${Math.round(r*0.65)}px IBM Plex Mono`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    const label = isWhistle && holeOffsetForWhistle !== undefined ? (holeOffsetForWhistle+i+1) : (i+1);
+    ctx.fillText(label, p.x, p.y);
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// UI HELPERS
+// ════════════════════════════════════════════════════════
+function setBodyMode(m) {
+  document.body.className=m;
+}
+function showPanel(m) {
+  ['panelScan','panelWhistle','panelTrumpet'].forEach(id=>{
+    document.getElementById(id).classList.remove('active');
+  });
+  const map={scanning:'panelScan',whistle:'panelWhistle',trumpet:'panelTrumpet'};
+  document.getElementById(map[m]).classList.add('active');
+}
+function updateModeUI(m) {
+  const labels={scanning:'SCANNING',whistle:'TIN WHISTLE',trumpet:'TRUMPET'};
+  const details={
+    scanning:'blob topology detection · waiting for template',
+    whistle: 'D major · mediapipe hands z-depth · tap detection · 6-hole · 2 hands',
+    trumpet: 'B♭ · mediapipe hands z-depth · 3-valve'
+  };
+  document.getElementById('modeBadgeText').textContent=labels[m];
+  document.getElementById('footerMode').textContent=labels[m];
+  document.getElementById('footerDetail').textContent=details[m];
+  if(m!=='scanning') {
+    document.getElementById('noteSub').textContent=
+      m==='whistle'?'cover holes & blow':'press valves & blow';
+  }
+}
+function setTag(id,text,cls){
+  const el=document.getElementById(id);
+  el.textContent=text;
+  el.className='tag'+(cls?' '+cls:'');
+}
+
+// ════════════════════════════════════════════════════════
+// KEYBOARD FALLBACK
+// ════════════════════════════════════════════════════════
+// SPACE = blow
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();
+    if(!isBlowing){micBlowing=true;updateBreathFusion();updateBreathUI();}}
+});
+document.addEventListener('keyup',e=>{
+  if(e.code==='Space'){micBlowing=false;updateBreathFusion();updateBreathUI();}
+});
+// 1/2/3 = trumpet valve press
+const kHeld=[false,false,false];
+document.addEventListener('keydown',e=>{
+  const i=['Digit1','Digit2','Digit3'].indexOf(e.code);
+  if(i>=0&&!kHeld[i]){kHeld[i]=true;fingerDepth[i]=0.9;setFingerState(i,'pressed');if(mode==='trumpet')updateNote();}
+});
+document.addEventListener('keyup',e=>{
+  const i=['Digit1','Digit2','Digit3'].indexOf(e.code);
+  if(i>=0){kHeld[i]=false;fingerDepth[i]=0;setFingerState(i,'idle');if(mode==='trumpet')updateNote();}
+});
+// W/E/R/T/Y/U = whistle holes (for testing)
+const holeKeys=['KeyQ','KeyW','KeyE','KeyA','KeyS','KeyD'];
+const hHeld=new Array(6).fill(false);
+document.addEventListener('keydown',e=>{
+  const i=holeKeys.indexOf(e.code);
+  if(i>=0&&!hHeld[i]){hHeld[i]=true;holesCovered[i]=true;if(mode==='whistle'){updateWhistleUI();updateNote();}}
+});
+document.addEventListener('keyup',e=>{
+  const i=holeKeys.indexOf(e.code);
+  if(i>=0){hHeld[i]=false;holesCovered[i]=false;if(mode==='whistle'){updateWhistleUI();updateNote();}}
+});
+
+// ════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════
+async function startAll() {
+  document.getElementById('startScreen').style.display='none';
+
+  overlayCanvas=document.getElementById('overlay');
+  analysisCanvas=document.createElement('canvas');
+  octx=overlayCanvas.getContext('2d');
+  actx=analysisCanvas.getContext('2d');
+  vid=document.getElementById('vid');
+
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:1280,height:720,facingMode:'user'}
+    });
+    vid.srcObject=stream;
+    await new Promise(r=>vid.addEventListener('loadedmetadata',r,{once:true}));
+    vid.classList.add('live');
+
+    overlayCanvas.width=analysisCanvas.width=vid.videoWidth||1280;
+    overlayCanvas.height=analysisCanvas.height=vid.videoHeight||720;
+
+    setTag('tagCam','CAM ON','on');
+    setBodyMode('scanning');
+    showPanel('scanning');
+    updateModeUI('scanning');
+
+    initMediaPipe(vid);
+    startVisionLoop();
+    startMic();
+
+  } catch(e){
+    document.getElementById('startScreen').style.display='flex';
+    document.querySelector('.cam-start p').textContent='Camera error: '+e.message;
+  }
+}
+
+window.addEventListener('resize',()=>{
+  if(!vid?.videoWidth) return;
+  overlayCanvas.width=analysisCanvas.width=vid.videoWidth;
+  overlayCanvas.height=analysisCanvas.height=vid.videoHeight;
+});
+</script>
+</body>
+</html>

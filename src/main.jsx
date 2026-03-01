@@ -1,9 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import AirPiano from './AirPiano.jsx'
+import { BrowserRouter } from 'react-router-dom'
+import App from './App'
+import './index.css'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AirPiano />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </StrictMode>
 )

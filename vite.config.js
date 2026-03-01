@@ -1,11 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@shared': path.resolve(__dirname, 'src/shared'),
+      '@instruments': path.resolve(__dirname, 'src/instruments'),
+    },
+  },
   server: {
-    // Allow camera access on local network (e.g. from Chromebook to dev machine)
-    // Vite localhost is treated as secure context by browsers so camera works fine
     port: 5173,
-  }
+  },
 })
