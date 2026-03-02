@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+<title>Paper Piano — 1-Octave Template (Tall Keys)</title>
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 297mm;
+    height: 210mm;
+    background: #fff;
+    font-family: 'Poppins', sans-serif;
+    color: #1a1a1a;
+    overflow: hidden;
+  }
+  .page {
+    width: 297mm;
+    height: 210mm;
+    padding: 5mm 8mm 8mm;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Scale to fit viewport on screen, keep exact A4 for print */
+  @media screen {
+    .page {
+      transform-origin: top left;
+      scale: min(calc(100vw / 297mm), calc(100vh / 210mm));
+    }
+  }
+
+  /* ─── Title ─── */
+  .title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2mm;
+  }
+  .title {
+    font-size: 22pt;
+    font-weight: bold;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+  .subtitle {
+    font-size: 11pt;
+    color: #888;
+    letter-spacing: 0.08em;
+  }
+
+  /* ─── Control section (compact) ─── */
+  .controls {
+    display: flex;
+    gap: 3mm;
+    align-items: flex-start;
+    margin-bottom: 2mm;
+    margin-left: 20mm; /* align with keyboard left (16mm ribbon + 4mm gap) */
+  }
+  .ctrl-col {
+    border: 0.3mm solid #999;
+    border-radius: 2mm;
+    padding: 2mm 3mm;
+  }
+  .ctrl-col-label {
+    font-size: 9pt;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 1.5mm;
+    text-align: center;
+  }
+  .ctrl-grid {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    gap: 2mm;
+    justify-items: center;
+  }
+  .ctrl-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+    gap: 2mm;
+    justify-items: center;
+  }
+  .ctrl-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5mm;
+  }
+  .ctrl-label {
+    font-size: 8pt;
+    color: #555;
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+  .ctrl-col-dual {
+    display: flex;
+    gap: 3mm;
+  }
+  .ctrl-col-dual > div {
+    flex: 1;
+  }
+
+  /* ─── Keyboard section ─── */
+  .keyboard-section {
+    display: flex;
+    gap: 4mm;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Ribbon column */
+  .ribbon-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0;
+    width: 16mm;
+    flex-shrink: 0;
+  }
+  .ribbon-marker {
+    display: flex;
+    align-items: center;
+    gap: 1.5mm;
+  }
+  .ribbon-label {
+    font-size: 8pt;
+    color: #888;
+    width: 5mm;
+    text-align: right;
+  }
+
+  /* Key area */
+  .key-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Key markers row */
+  .key-markers {
+    position: relative;
+    height: 16mm;
+    margin-bottom: 1mm;
+    flex-shrink: 0;
+  }
+  .key-marker {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5mm;
+  }
+  .key-marker-label {
+    font-size: 11pt;
+    color: #888;
+  }
+
+  /* Piano keys — fills remaining space */
+  .piano {
+    position: relative;
+    flex: 1;
+    border: 0.5mm solid #1a1a1a;
+    border-radius: 2mm;
+    background: #fff;
+    overflow: hidden;
+  }
+  .white-key {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-right: 0.3mm solid #333;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 5mm;
+    font-size: 22pt;
+    font-weight: 600;
+    color: #aaa;
+  }
+  .white-key:last-of-type {
+    border-right: none;
+  }
+  .black-key {
+    position: absolute;
+    top: 0;
+    height: 62%;
+    background: #1a1a1a;
+    border-radius: 0 0 2mm 2mm;
+    z-index: 2;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 4mm;
+    font-size: 14pt;
+    font-weight: 600;
+    color: #999;
+  }
+
+  /* ─── ArUco marker canvas ─── */
+  .aruco {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+
+  /* Print styles */
+  @media print {
+    html, body {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .no-print { display: none !important; }
+  }
+
+  /* Screen-only print button */
+  .print-btn {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 8px 18px;
+    font-family: 'Poppins', sans-serif;
+    font-size: 12px;
+    background: #1a1a1a;
+    color: #f5f0e0;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    z-index: 100;
+  }
+  .print-btn:hover { background: #444; }
+</style>
+</head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">PRINT / PDF</button>
+
+<div class="page">
+  <!-- Title -->
+  <div class="title-row">
+    <div class="title">Paper Piano</div>
+    <div class="subtitle">1-Octave · Place flat · Camera overhead · Tap keys</div>
+  </div>
+
+  <!-- Control markers (compact, above keyboard) -->
+  <div class="controls" id="controls"></div>
+
+  <!-- Keyboard section: ribbon + key markers + piano keys -->
+  <div class="keyboard-section">
+    <!-- Ribbon strip -->
+    <div class="ribbon-col" id="ribbon-col"></div>
+
+    <!-- Key area -->
+    <div class="key-area">
+      <!-- Key markers row -->
+      <div class="key-markers" id="key-markers"></div>
+
+      <!-- Piano keys (fills remaining height) -->
+      <div class="piano" id="piano"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── ArUco DICT_4X4_1000 dictionary data (first 100 entries) ────────────────
+const DICT = [
+  [181,50],[15,154],[51,45],[153,70],[84,158],[121,205],[158,46],[196,242],
+  [254,218],[207,86],[249,145],[17,167],[14,183],[42,15],[36,177],[38,62],
+  [70,101],[102,0],[108,94],[118,175],[134,139],[176,43],[204,213],[221,130],
+  [254,71],[148,113],[172,228],[165,84],[33,35],[52,111],[68,21],[87,178],
+  [158,207],[240,203],[8,174],[9,41],[24,117],[4,255],[13,246],[28,90],
+  [23,24],[42,40],[50,140],[56,178],[36,232],[46,235],
+  [45,63],[75,100],[80,46],[80,19],[81,148],[85,104],[93,65],
+  [95,151],[104,1],[104,103],[97,36],[97,233],
+  [107,18],[111,229],[103,223],[126,27],[128,160],[131,68],[139,162],[147,122],
+  [132,108],[133,42],[133,156],[156,137],[159,161],[187,124],[188,4],[182,91],
+  [191,200],[183,171],[202,31],[201,98],[217,88],[211,213],[204,152],[199,160],
+  [197,55],[233,93],[249,37],[251,187],[238,42],[247,77],[53,117],[138,173],
+  [118,23],[10,207],[6,75],[45,193],[73,216],[67,244],[79,54],[79,211],
+  [105,228],[112,199],
+];
+
+function decodeBits(bytes) {
+  const val = (bytes[0] << 8) | bytes[1];
+  const grid = [];
+  for (let r = 0; r < 4; r++) {
+    const row = [];
+    for (let c = 0; c < 4; c++) {
+      row.push((val >> (15 - r * 4 - c)) & 1);
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
+function makeMarker(id, sizeMM) {
+  const cellCount = 6;
+  const pxPerCell = 12;
+  const totalPx = cellCount * pxPerCell;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = totalPx;
+  canvas.height = totalPx;
+  canvas.className = 'aruco';
+  canvas.style.width = sizeMM + 'mm';
+  canvas.style.height = sizeMM + 'mm';
+  canvas.title = 'ID ' + id;
+
+  const ctx = canvas.getContext('2d');
+  const grid = decodeBits(DICT[id]);
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, totalPx, totalPx);
+
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      if (grid[r][c] === 1) {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect((c + 1) * pxPerCell, (r + 1) * pxPerCell, pxPerCell, pxPerCell);
+      }
+    }
+  }
+
+  return canvas;
+}
+
+// ─── Layout: 1 octave (C–C) = 8 white keys ─────────────────────────────────
+const NUM_WHITES = 8; // C D E F G A B C
+const KEYBOARD_W = 257; // mm (page width minus ribbon and margins)
+const WHITE_KEY_W = KEYBOARD_W / NUM_WHITES; // ~32mm per key
+const KEY_MARKER_SIZE = 10; // mm (larger — more space per key)
+const RIBBON_MARKER_SIZE = 8; // mm
+const CTRL_MARKER_SIZE = 10; // mm (compact controls)
+
+const WHITE_LABELS = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'];
+
+// White key marker IDs: oct1 C-B = 0-6, top C = 58
+const WHITE_IDS = [0, 1, 2, 3, 4, 5, 6, 58];
+
+// Black keys: C# D# F# G# A# = IDs 8-12
+const BLACK_IDS = [8, 9, 10, 11, 12];
+const BLACK_LABEL_NAMES = ['C#', 'D#', 'F#', 'G#', 'A#'];
+// Black key positions as index of white key to the LEFT
+const BLACK_LEFT_WHITE = [0, 1, 3, 4, 5];
+
+const whiteXs = WHITE_LABELS.map((_, i) => i * WHITE_KEY_W + WHITE_KEY_W / 2);
+const blackXs = BLACK_LEFT_WHITE.map(lw => (lw + 1) * WHITE_KEY_W);
+
+// ─── Build key markers row ────────────────────────────────────────────────
+const keyMarkersEl = document.getElementById('key-markers');
+
+whiteXs.forEach((x, i) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'key-marker';
+  wrap.style.left = (x - KEY_MARKER_SIZE / 2) + 'mm';
+  wrap.style.top = '0';
+  wrap.appendChild(makeMarker(WHITE_IDS[i], KEY_MARKER_SIZE));
+  const lbl = document.createElement('div');
+  lbl.className = 'key-marker-label';
+  lbl.textContent = WHITE_LABELS[i];
+  wrap.appendChild(lbl);
+  keyMarkersEl.appendChild(wrap);
+});
+
+blackXs.forEach((x, i) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'key-marker';
+  wrap.style.left = (x - KEY_MARKER_SIZE / 2) + 'mm';
+  wrap.style.top = '0';
+  wrap.appendChild(makeMarker(BLACK_IDS[i], KEY_MARKER_SIZE));
+  const lbl = document.createElement('div');
+  lbl.className = 'key-marker-label';
+  lbl.textContent = BLACK_LABEL_NAMES[i];
+  wrap.appendChild(lbl);
+  keyMarkersEl.appendChild(wrap);
+});
+
+// ─── Build piano keys (visual) ──────────────────────────────────────────
+const pianoEl = document.getElementById('piano');
+pianoEl.style.width = KEYBOARD_W + 'mm';
+keyMarkersEl.style.width = KEYBOARD_W + 'mm';
+
+for (let i = 0; i < NUM_WHITES; i++) {
+  const key = document.createElement('div');
+  key.className = 'white-key';
+  key.style.left = (i * WHITE_KEY_W) + 'mm';
+  key.style.width = WHITE_KEY_W + 'mm';
+  key.textContent = WHITE_LABELS[i];
+  pianoEl.appendChild(key);
+}
+
+const BLACK_W = WHITE_KEY_W * 0.58;
+BLACK_LEFT_WHITE.forEach((lw, i) => {
+  const key = document.createElement('div');
+  key.className = 'black-key';
+  key.style.left = ((lw + 1) * WHITE_KEY_W - BLACK_W / 2) + 'mm';
+  key.style.width = BLACK_W + 'mm';
+  key.textContent = BLACK_LABEL_NAMES[i];
+  pianoEl.appendChild(key);
+});
+
+// ─── Build ribbon strip ──────────────────────────────────────────────────
+const ribbonEl = document.getElementById('ribbon-col');
+for (let i = 9; i >= 0; i--) {
+  const id = 13 + i;
+  const row = document.createElement('div');
+  row.className = 'ribbon-marker';
+  const lbl = document.createElement('div');
+  lbl.className = 'ribbon-label';
+  lbl.textContent = 'R' + i;
+  row.appendChild(lbl);
+  row.appendChild(makeMarker(id, RIBBON_MARKER_SIZE));
+  ribbonEl.appendChild(row);
+}
+
+// ─── Build control section (compact) ────────────────────────────────────
+const controlsEl = document.getElementById('controls');
+
+function makeCtrlCol(label, items, gridClass) {
+  const col = document.createElement('div');
+  col.className = 'ctrl-col';
+  const lbl = document.createElement('div');
+  lbl.className = 'ctrl-col-label';
+  lbl.textContent = label;
+  col.appendChild(lbl);
+
+  const grid = document.createElement('div');
+  grid.className = gridClass || 'ctrl-grid';
+
+  items.forEach(item => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctrl-item';
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    const cl = document.createElement('div');
+    cl.className = 'ctrl-label';
+    cl.textContent = item.label;
+    wrap.appendChild(cl);
+    grid.appendChild(wrap);
+  });
+
+  col.appendChild(grid);
+  controlsEl.appendChild(col);
+}
+
+makeCtrlCol('CHORD', [
+  {id:23, label:'MAJ'}, {id:24, label:'MIN'}, {id:25, label:'MAJ7'}, {id:26, label:'DOM7'},
+  {id:27, label:'\u00BDDIM'}, {id:28, label:'DIM'}, {id:29, label:'AUG'}, {id:30, label:'PWR'},
+], 'ctrl-grid-4');
+
+// ARP + RATE combined
+(function() {
+  const col = document.createElement('div');
+  col.className = 'ctrl-col';
+  const dual = document.createElement('div');
+  dual.className = 'ctrl-col-dual';
+
+  const arpDiv = document.createElement('div');
+  const arpLbl = document.createElement('div');
+  arpLbl.className = 'ctrl-col-label';
+  arpLbl.textContent = 'ARP';
+  arpDiv.appendChild(arpLbl);
+  const arpGrid = document.createElement('div');
+  arpGrid.className = 'ctrl-grid';
+  [{id:31, label:'OFF'}, {id:32, label:'UP'}, {id:33, label:'DN'},
+   {id:34, label:'\u25B2\u25BC'}, {id:35, label:'RND'}].forEach(item => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctrl-item';
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    const cl = document.createElement('div');
+    cl.className = 'ctrl-label';
+    cl.textContent = item.label;
+    wrap.appendChild(cl);
+    arpGrid.appendChild(wrap);
+  });
+  arpDiv.appendChild(arpGrid);
+
+  const rateDiv = document.createElement('div');
+  const rateLbl = document.createElement('div');
+  rateLbl.className = 'ctrl-col-label';
+  rateLbl.textContent = 'RATE';
+  rateDiv.appendChild(rateLbl);
+  const rateGrid = document.createElement('div');
+  rateGrid.className = 'ctrl-grid';
+  [{id:36, label:'\uD834\uDD5D'}, {id:37, label:'\uD834\uDD5E'}, {id:38, label:'\u2669'},
+   {id:39, label:'\u266A'}, {id:40, label:'\u266C'}].forEach(item => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ctrl-item';
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    const cl = document.createElement('div');
+    cl.className = 'ctrl-label';
+    cl.textContent = item.label;
+    wrap.appendChild(cl);
+    rateGrid.appendChild(wrap);
+  });
+  rateDiv.appendChild(rateGrid);
+
+  dual.appendChild(arpDiv);
+  dual.appendChild(rateDiv);
+  col.appendChild(dual);
+  controlsEl.appendChild(col);
+})();
+
+makeCtrlCol('CTRL', [
+  {id:41, label:'OCT\u2212'}, {id:42, label:'OCT+'}, {id:43, label:'SUSTAIN'},
+  {id:44, label:'MOD'}, {id:45, label:'VOL'},
+]);
+</script>
+</body>
+</html>
