@@ -1,17 +1,14 @@
-import { cn } from '@shared/lib/utils'
-
 export default function ScanButton({ scanning, status, onScan, onReset }) {
   return (
-    <div className="flex gap-1.5">
+    <div className="flex gap-2">
       {(status === 'ready' || status === 'scan_needed') && (
         <button
           onClick={onScan}
-          className={cn(
-            'rounded-md px-2.5 py-0.5 text-[0.68rem] border cursor-pointer',
+          className={`rounded-md px-3 py-1.5 text-xs font-medium border cursor-pointer transition-colors ${
             scanning
-              ? 'bg-success/20 border-success/40 text-success animate-pulse'
-              : 'bg-success/10 border-success/40 text-success'
-          )}
+              ? 'bg-gray-900 border-gray-900 text-white animate-pulse'
+              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+          }`}
         >
           {scanning ? 'Scanning...' : 'Scan'}
         </button>
@@ -19,7 +16,7 @@ export default function ScanButton({ scanning, status, onScan, onReset }) {
       {status === 'ready' && (
         <button
           onClick={onReset}
-          className="rounded-md px-2.5 py-0.5 text-[0.68rem] border bg-error/10 border-error/30 text-error/80 cursor-pointer"
+          className="rounded-md px-3 py-1.5 text-xs font-medium border border-gray-200 text-gray-400 cursor-pointer hover:bg-gray-50 hover:text-gray-600"
         >
           Reset
         </button>

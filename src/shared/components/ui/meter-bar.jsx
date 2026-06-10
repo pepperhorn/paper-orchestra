@@ -3,7 +3,6 @@ import { cn } from '@shared/lib/utils'
 export default function MeterBar({
   label,
   value = 0,
-  color = '#60c0ff',
   direction = 'vertical',
   className,
 }) {
@@ -11,25 +10,25 @@ export default function MeterBar({
   const isVert = direction === 'vertical'
 
   return (
-    <div className={cn('flex items-center gap-1', isVert ? 'flex-col' : 'flex-row', className)}>
+    <div className={cn('flex items-center gap-1.5', isVert ? 'flex-col' : 'flex-row', className)}>
       {label && (
-        <div className="text-[0.58rem] text-text-muted tracking-wide uppercase">{label}</div>
+        <div className="text-[0.6rem] text-gray-400 tracking-wide uppercase font-medium min-w-8">{label}</div>
       )}
       <div
         className={cn(
-          'bg-white/[0.07] rounded-lg border border-white/10 relative overflow-hidden',
-          isVert ? 'w-5 h-[90px]' : 'h-5 w-[90px]'
+          'bg-gray-100 rounded-full relative overflow-hidden',
+          isVert ? 'w-3 h-[72px]' : 'h-2 w-[72px]'
         )}
       >
         <div
-          className="absolute transition-all duration-[40ms]"
+          className="absolute bg-gray-500 rounded-full transition-all duration-[40ms]"
           style={isVert
-            ? { bottom: 0, left: 0, right: 0, height: `${pct}%`, background: `linear-gradient(to top, ${color}, transparent)` }
-            : { left: 0, top: 0, bottom: 0, width: `${pct}%`, background: `linear-gradient(to right, ${color}, transparent)` }
+            ? { bottom: 0, left: 0, right: 0, height: `${pct}%` }
+            : { left: 0, top: 0, bottom: 0, width: `${pct}%` }
           }
         />
       </div>
-      <div className="text-[0.58rem] font-mono text-text-muted">{pct}%</div>
+      <div className="text-[0.6rem] font-mono text-gray-400 min-w-6">{pct}%</div>
     </div>
   )
 }

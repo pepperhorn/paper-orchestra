@@ -14,21 +14,19 @@ export default function TransportControls({
   onBpmChange,
 }) {
   return (
-    <div className="w-full flex gap-1.5 items-center flex-wrap">
-      {/* REC arm button */}
+    <div className="w-full flex gap-2 items-center flex-wrap">
       <button
         onClick={onToggleArm}
         className={cn(
-          'rounded-md px-2.5 py-0.5 text-[0.68rem] font-bold border cursor-pointer',
+          'rounded-md px-3 py-1.5 text-xs font-medium border cursor-pointer transition-colors',
           recArmed
-            ? 'bg-red-500/25 border-red-500/70 text-red-400'
-            : 'bg-red-500/[0.08] border-red-500/30 text-red-300/60'
+            ? 'bg-gray-900 border-gray-900 text-white'
+            : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'
         )}
       >
         {recArmed ? '● REC' : 'REC'}
       </button>
 
-      {/* Slot buttons */}
       {recordings.map((rec, i) => {
         const isRec = recSlot === i
         const isPlay = playSlot === i
@@ -39,11 +37,11 @@ export default function TransportControls({
             onClick={() => onSlotClick(i)}
             onContextMenu={e => { e.preventDefault(); if (filled) onSlotClear(i) }}
             className={cn(
-              'min-w-7 rounded-md px-1.5 py-0.5 text-[0.68rem] font-mono border cursor-pointer',
-              isRec && 'bg-red-500/30 border-red-500/70 text-red-400',
-              isPlay && 'bg-green-500/25 border-green-500/60 text-green-300',
-              !isRec && !isPlay && filled && 'bg-accent/[0.12] border-accent/30 text-accent',
-              !isRec && !isPlay && !filled && 'bg-white/[0.05] border-white/10 text-text-faint'
+              'min-w-7 rounded-md px-1.5 py-1.5 text-xs font-mono border cursor-pointer transition-colors',
+              isRec && 'bg-gray-900 border-gray-900 text-white',
+              isPlay && 'bg-gray-600 border-gray-600 text-white',
+              !isRec && !isPlay && filled && 'bg-gray-100 border-gray-300 text-gray-700',
+              !isRec && !isPlay && !filled && 'bg-white border-gray-200 text-gray-300'
             )}
           >
             {isRec ? '●' : isPlay ? '▶' : i + 1}
@@ -51,18 +49,17 @@ export default function TransportControls({
         )
       })}
 
-      {/* Tap tempo */}
-      <div className="ml-auto flex gap-1.5 items-center">
+      <div className="ml-auto flex gap-2 items-center">
         {metroActive && (
-          <span className="text-[0.62rem] font-mono text-success">{bpm} bpm</span>
+          <span className="text-xs font-mono text-gray-500">{bpm} bpm</span>
         )}
         <button
           onClick={onTap}
           className={cn(
-            'rounded-md px-2.5 py-0.5 text-[0.68rem] font-bold border cursor-pointer',
+            'rounded-md px-3 py-1.5 text-xs font-medium border cursor-pointer transition-colors',
             metroActive
-              ? 'bg-success/20 border-success/50 text-success'
-              : 'bg-white/[0.05] border-white/10 text-text-muted'
+              ? 'bg-gray-900 border-gray-900 text-white'
+              : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'
           )}
         >
           {metroActive ? '■ TAP' : 'TAP'}

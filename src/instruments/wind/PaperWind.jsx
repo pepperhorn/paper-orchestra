@@ -11,6 +11,8 @@ import { audioManager } from '@shared/audio/manager'
 import InstrumentShell from '@shared/components/ui/instrument-shell'
 import CameraOverlay from '@shared/components/ui/camera-overlay'
 import MeterBar from '@shared/components/ui/meter-bar'
+import OrchestraBadge from '@shared/components/ui/orchestra-badge'
+import { useOrchestra } from '@shared/hooks/use-orchestra'
 
 export default function PaperWind() {
   const videoRef = useRef(null)
@@ -41,6 +43,13 @@ export default function PaperWind() {
   const [scanProgress, setScanProgress] = useState(0)
   const fpsRef = useRef({ n: 0, last: Date.now() })
   const blobsRef = useRef([])
+
+  const orchestra = useOrchestra({
+    onBpmChange: () => {},
+    onCommand: (cmd) => {
+      if (cmd === 'mute') stopNote()
+    },
+  })
 
   // Initialize everything
   useEffect(() => {
@@ -172,6 +181,7 @@ export default function PaperWind() {
     oscRef.current.frequency.setTargetAtTime(freq, t, 0.03)
     gainRef.current.gain.setTargetAtTime(Math.min(0.5, dynamics * 0.6), t, 0.02)
     filterRef.current.frequency.setTargetAtTime(800 + dynamics * 3000, t, 0.02)
+    orchestra.sendNoteEvent('wind', freq, dynamics, 'on')
   }
 
   function stopNote() {
@@ -185,6 +195,7 @@ export default function PaperWind() {
       oscRef.current = null
       filterRef.current = null
       gainRef.current = null
+      orchestra.sendNoteEvent('wind', 0, 0, 'off')
     }
   }
 
@@ -242,11 +253,11 @@ export default function PaperWind() {
       const state = states[i]
       ctx.beginPath()
       ctx.arc(hole.cx, hole.cy, hole.r, 0, Math.PI * 2)
-      ctx.strokeStyle = state === 'pressed' ? '#ff4040' : state === 'hovering' ? '#ffa030' : '#60c0ff'
+      ctx.strokeStyle = state === 'pressed' ? '#111827' : state === 'hovering' ? '#6b7280' : '#9ca3af'
       ctx.lineWidth = state === 'pressed' ? 4 : 2
       ctx.stroke()
       if (state === 'pressed') {
-        ctx.fillStyle = 'rgba(255,64,64,0.3)'
+        ctx.fillStyle = 'rgba(17,24,39,0.2)'
         ctx.fill()
       }
     })
@@ -258,10 +269,10 @@ export default function PaperWind() {
     blobs.forEach((blob, i) => {
       ctx.beginPath()
       ctx.arc(blob.cx, blob.cy, 20, 0, Math.PI * 2)
-      ctx.strokeStyle = vs[i] ? '#ff4040' : '#60c0ff'
+      ctx.strokeStyle = vs[i] ? '#111827' : '#9ca3af'
       ctx.lineWidth = vs[i] ? 4 : 2
       ctx.stroke()
-      if (vs[i]) { ctx.fillStyle = 'rgba(255,64,64,0.3)'; ctx.fill() }
+      if (vs[i]) { ctx.fillStyle = 'rgba(17,24,39,0.2)'; ctx.fill() }
       ctx.fillStyle = '#fff'
       ctx.font = 'bold 12px monospace'
       ctx.textAlign = 'center'
@@ -283,59 +294,53 @@ export default function PaperWind() {
   return (
     <InstrumentShell
       name="Paper Wind"
-      version="PepperHorn x CRF · Whistle + Trumpet · Breath-controlled"
       fps={fps}
       handCount={handCount}
       status={status}
       statusMessage={message}
       onClickCapture={() => audioManager.ensure()}
-      sidebar={
-        <div className="flex flex-col gap-2 items-center">
-          <MeterBar label="BREATH" value={breathLevel} color="#60c0ff" />
-          <MeterBar label="LIP" value={lipLevel} color="#ff8040" />
-          <MeterBar label="MIC" value={micLevel} color="#7ad890" />
-          {isBlowing && (
-            <div className="text-[0.58rem] text-success font-mono animate-pulse">BLOWING</div>
-          )}
-        </div>
-      }
     >
-      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef} status={status}>
-        {/* Scan progress */}
+      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef}>
         {mode === 'scanning' && scanProgress > 0 && (
-          <div className="absolute bottom-2 left-2 right-2 h-2 bg-black/60 rounded-full overflow-hidden">
-            <div className="h-full bg-info rounded-full transition-all" style={{ width: `${scanProgress * 100}%` }} />
+          <div className="absolute bottom-2 left-2 right-2 h-1.5 bg-black/40 rounded-full overflow-hidden">
+            <div className="h-full bg-white rounded-full transition-all" style={{ width: `${scanProgress * 100}%` }} />
           </div>
         )}
-        {/* Current note */}
         {currentNote && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/80 rounded-md px-3 py-1 text-lg font-bold text-accent font-display">
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 rounded-md px-3 py-1 text-sm font-medium text-white">
             {currentNote.note}
           </div>
         )}
-        {/* Mode badge */}
         {mode !== 'scanning' && (
-          <div className="absolute top-1.5 left-1.5 bg-info/70 rounded px-2 py-0.5 text-[0.65rem] text-white uppercase tracking-wider">
+          <div className="absolute top-2 left-2 bg-black/60 rounded px-2 py-0.5 text-xs text-white uppercase tracking-wider">
             {mode}
           </div>
         )}
       </CameraOverlay>
 
-      {/* Fingering chart */}
+      {/* Breath meters */}
+      <div className="flex gap-4 items-center w-full">
+        <MeterBar label="BREATH" value={breathLevel} direction="horizontal" />
+        <MeterBar label="LIP" value={lipLevel} direction="horizontal" />
+        <MeterBar label="MIC" value={micLevel} direction="horizontal" />
+        {isBlowing && <span className="text-xs font-mono text-gray-900 animate-pulse font-medium">BLOWING</span>}
+      </div>
+
+      {/* Whistle fingering chart */}
       {mode === 'whistle' && (
-        <div className="w-full mt-2 bg-white/[0.04] border border-white/[0.08] rounded-lg p-2.5">
-          <div className="text-[0.58rem] text-text-dim tracking-wider mb-1.5">WHISTLE FINGERING</div>
+        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <div className="text-[0.6rem] text-gray-400 tracking-wider mb-1.5 uppercase font-medium">Whistle fingering</div>
           <div className="flex gap-1.5 flex-wrap">
             {WHISTLE_NOTES.map((n, i) => {
               const matched = currentNote?.note === n.note
               return (
-                <div key={i} className={`rounded-md px-2 py-1 text-[0.62rem] border ${
-                  matched ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-white/[0.04] border-white/10 text-text-muted'
+                <div key={i} className={`rounded-md px-2 py-1 text-xs border ${
+                  matched ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-500'
                 }`}>
-                  <div className="font-bold font-mono">{n.note}</div>
+                  <div className="font-medium font-mono">{n.note}</div>
                   <div className="flex gap-0.5 mt-0.5">
                     {n.holes.map((h, j) => (
-                      <div key={j} className={`w-2 h-2 rounded-full ${h ? 'bg-error' : 'bg-white/20'}`} />
+                      <div key={j} className={`w-2 h-2 rounded-full ${h ? 'bg-gray-900' : 'bg-gray-200'}`} />
                     ))}
                   </div>
                 </div>
@@ -345,13 +350,14 @@ export default function PaperWind() {
         </div>
       )}
 
+      {/* Trumpet valves + fingering chart */}
       {mode === 'trumpet' && (
-        <div className="w-full mt-2 bg-white/[0.04] border border-white/[0.08] rounded-lg p-2.5">
-          <div className="text-[0.58rem] text-text-dim tracking-wider mb-1.5">TRUMPET VALVES</div>
+        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <div className="text-[0.6rem] text-gray-400 tracking-wider mb-1.5 uppercase font-medium">Trumpet valves</div>
           <div className="flex gap-3 justify-center mb-2">
             {valveStates.map((pressed, i) => (
-              <div key={i} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-sm font-bold ${
-                pressed ? 'bg-error/30 border-error text-error' : 'bg-white/[0.05] border-white/20 text-text-muted'
+              <div key={i} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-sm font-medium transition-colors ${
+                pressed ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-400'
               }`}>
                 {i + 1}
               </div>
@@ -361,13 +367,13 @@ export default function PaperWind() {
             {TRUMPET_NOTES.map((n, i) => {
               const matched = currentNote?.note === n.note
               return (
-                <div key={i} className={`rounded-md px-2 py-1 text-[0.62rem] border ${
-                  matched ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-white/[0.04] border-white/10 text-text-muted'
+                <div key={i} className={`rounded-md px-2 py-1 text-xs border ${
+                  matched ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-500'
                 }`}>
-                  <div className="font-bold font-mono">{n.note}</div>
+                  <div className="font-medium font-mono">{n.note}</div>
                   <div className="flex gap-0.5 mt-0.5">
                     {n.v.map((h, j) => (
-                      <div key={j} className={`w-2 h-2 rounded-full ${h ? 'bg-error' : 'bg-white/20'}`} />
+                      <div key={j} className={`w-2 h-2 rounded-full ${h ? 'bg-gray-900' : 'bg-gray-200'}`} />
                     ))}
                   </div>
                 </div>
@@ -378,16 +384,16 @@ export default function PaperWind() {
       )}
 
       {/* Controls */}
-      <div className="flex gap-1.5 flex-wrap justify-center w-full max-w-[600px] mt-2">
+      <div className="flex gap-2 flex-wrap justify-center w-full">
         {mode !== 'scanning' && (
-          <button onClick={requestRescan} className="rounded-md px-2.5 py-0.5 text-[0.68rem] border cursor-pointer bg-warning/10 border-warning/40 text-warning">
+          <button onClick={requestRescan} className="rounded-md px-3 py-1.5 text-xs font-medium border border-gray-200 text-gray-500 cursor-pointer hover:bg-gray-50 transition-colors">
             Re-scan
           </button>
         )}
       </div>
 
-      <Link to="/" className="flex items-center gap-1 text-text-dim text-sm hover:text-accent mt-4 no-underline">
-        <ArrowLeft size={14} /> Back to launcher
+      <Link to="/" className="flex items-center gap-1 text-gray-400 text-xs hover:text-gray-900 mt-2 no-underline transition-colors">
+        <ArrowLeft size={14} /> Back
       </Link>
     </InstrumentShell>
   )

@@ -46,7 +46,7 @@ export function processFrame(results, ctx) {
   if (status !== 'ready') return { newlyPressed: new Set() }
 
   // Compute key detection parameters
-  const zoneParams = computeKeyZoneParams(knownMkrs)
+  const zoneParams = computeKeyZoneParams(knownMkrs, kb)
   if (!zoneParams) return { newlyPressed: new Set() }
   const { markerRowY, keyZoneDepth, avgKeyWidth } = zoneParams
 

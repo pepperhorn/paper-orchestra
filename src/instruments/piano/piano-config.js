@@ -1,4 +1,4 @@
-// Tag ID map — must match piano_template_v3.html
+// Tag ID map — must match piano_template_v3_1oct.html
 export const TAG = {
   // Position markers — octave 1 (0-6, 8-12)
   C4: 0, D4: 1, E4: 2, F4: 3, G4: 4, A4: 5, B4: 6,
@@ -13,20 +13,23 @@ export const TAG = {
   RATE_WHOLE: 36, RATE_HALF: 37, RATE_QUARTER: 38, RATE_EIGHTH: 39, RATE_16TH: 40,
   OCT_DOWN: 41, OCT_UP: 42, SUSTAIN: 43,
   MODE_MOD: 44, MODE_VOL: 45,
-  // Position markers — octave 2 (46-52, 53-57)
+  // Top C (58) — shared by 1-oct and 2-oct templates
+  TOP_C: 58,
+  // Octave 2 position markers (only on 2-oct template)
   C5: 46, D5: 47, E5: 48, F5: 49, G5: 50, A5: 51, B5: 52,
   Cs5: 53, Ds5: 54, Fs5: 55, Gs5: 56, As5: 57,
-  // Top C (58)
-  C6: 58,
 }
 
 export const TAG_INV = Object.fromEntries(Object.entries(TAG).map(([k, v]) => [v, k]))
 
-// Position markers excluded from ghost-marker logic
-export const POSITION_TAGS = new Set([
-  ...Array.from({ length: 23 }, (_, i) => i),
-  ...Array.from({ length: 13 }, (_, i) => 46 + i),
-])
+// Build position tags dynamically from a keyboard — excludes these from ghost detection
+export function buildPositionTags(kb) {
+  const tags = new Set()
+  for (const k of kb.all) if (k.tagId != null) tags.add(k.tagId)
+  // Ribbon markers are also position markers
+  for (let i = TAG.RIB_0; i <= TAG.RIB_9; i++) tags.add(i)
+  return tags
+}
 
 export const CHORD_TAG_MAP = {
   [TAG.CHORD_MAJ]: 'maj', [TAG.CHORD_MIN]: 'min', [TAG.CHORD_MAJ7]: 'maj7',
@@ -70,19 +73,33 @@ function buildOctave(oct, tagOct) {
   return { whites, blacks, all: [...whites, ...blacks] }
 }
 
-export function buildKeyboard(octave) {
+export function buildKeyboard(octave, octaveCount = 1) {
   const oct1 = buildOctave(octave, 4)
+  const topC = {
+    id: `C${octave + 1}`, label: 'C', freq: 261.63 * Math.pow(2, (octave + 1) - 4),
+    semi: 0, tagId: TAG.TOP_C, whiteIdx: 7,
+  }
+
+  if (octaveCount === 1) {
+    return {
+      whites: [...oct1.whites, topC],
+      blacks: [...oct1.blacks],
+      all: [...oct1.all, topC],
+    }
+  }
+
   const oct2 = buildOctave(octave + 1, 5)
   oct2.whites.forEach((w, i) => { w.whiteIdx = 7 + i })
   oct2.blacks.forEach(b => { b.leftWhiteIdx += 7 })
-  const topC = {
-    id: `C${octave + 2}`, label: 'C', freq: 261.63 * Math.pow(2, (octave + 2) - 4),
-    semi: 0, tagId: TAG.C6, whiteIdx: 14,
+  const topC2 = {
+    ...topC,
+    id: `C${octave + 2}`, freq: 261.63 * Math.pow(2, (octave + 2) - 4),
+    whiteIdx: 14,
   }
   return {
-    whites: [...oct1.whites, ...oct2.whites, topC],
+    whites: [...oct1.whites, ...oct2.whites, topC2],
     blacks: [...oct1.blacks, ...oct2.blacks],
-    all: [...oct1.all, ...oct2.all, topC],
+    all: [...oct1.all, ...oct2.all, topC2],
   }
 }
 

@@ -17,8 +17,10 @@ function loadScript(src) {
  * Load MediaPipe Hands and Camera Utils scripts from CDN.
  */
 export async function loadMediaPipeHands() {
+  console.log('[MediaPipe] Loading Hands + Camera Utils from CDN...')
   await loadScript(`${MP_HANDS_CDN}/hands.js`)
   await loadScript(`${MP_CAMERA_CDN}/camera_utils.js`)
+  console.log('[MediaPipe] Scripts loaded')
 }
 
 /**
@@ -53,7 +55,13 @@ export function createHandTracker(videoEl, onResults, options = {}) {
     minDetectionConfidence: detection,
     minTrackingConfidence: tracking,
   })
-  hands.onResults(onResults)
+  let frameCount = 0
+  hands.onResults((results) => {
+    frameCount++
+    if (frameCount === 1) console.log('[MediaPipe] First hand results received')
+    if (frameCount % 300 === 0) console.log(`[MediaPipe] ${frameCount} frames processed, ${results.multiHandLandmarks?.length || 0} hands`)
+    onResults(results)
+  })
 
   // eslint-disable-next-line no-undef
   const camera = new Camera(videoEl, {
@@ -61,6 +69,7 @@ export function createHandTracker(videoEl, onResults, options = {}) {
     width,
     height,
   })
+  console.log('[MediaPipe] Starting camera loop...')
   camera.start()
 
   return { hands, camera }

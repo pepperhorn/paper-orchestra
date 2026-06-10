@@ -1,7 +1,7 @@
 export default function Knob({ label, value, min, max, step, onChange, fmt }) {
   return (
     <div className="flex flex-col items-center gap-0.5">
-      <div className="text-[0.58rem] text-text-muted uppercase tracking-wide">{label}</div>
+      <div className="text-[0.65rem] text-gray-400 uppercase tracking-wide font-medium">{label}</div>
       <input
         type="range"
         min={min}
@@ -9,9 +9,9 @@ export default function Knob({ label, value, min, max, step, onChange, fmt }) {
         step={step}
         value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-[58px] cursor-pointer accent-accent-warm"
+        className="w-[58px] cursor-pointer"
       />
-      <div className="text-[0.62rem] text-accent font-mono">
+      <div className="text-[0.65rem] text-gray-900 font-mono">
         {fmt ? fmt(value) : value}
       </div>
     </div>

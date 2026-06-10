@@ -1,40 +1,34 @@
 // aruco.js — ArUco marker detection with support for multiple dictionaries
+// Uses js-aruco2 npm package, bundled by Vite (no more CDN script tags)
 
-const DICT_URLS = {
-  'ARUCO_4X4_1000': [
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/aruco.min.js',
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/dictionaries/aruco_4x4_1000.js',
-  ],
-  'ARUCO_4X4_50': [
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/aruco.min.js',
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/dictionaries/aruco_4x4_50.js',
-  ],
-  'ARUCO_6X6_250': [
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/aruco.min.js',
-    'https://cdn.jsdelivr.net/npm/js-aruco2@1.0.4/src/dictionaries/aruco_6x6_250.js',
-  ],
-}
+let AR = null
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
-    const s = document.createElement('script')
-    s.src = src; s.crossOrigin = 'anonymous'
-    s.onload = resolve; s.onerror = reject
-    document.body.appendChild(s)
-  })
+const DICT_LOADERS = {
+  'ARUCO_4X4_1000': () => import('js-aruco2/src/dictionaries/aruco_4x4_1000.js'),
+  'ARUCO_6X6_1000': () => import('js-aruco2/src/dictionaries/aruco_6x6_1000.js'),
 }
 
 /**
- * Load the ArUco library scripts for a given dictionary.
+ * Load the ArUco library and a dictionary.
  *
  * @param {string} dict - Dictionary name (e.g. 'ARUCO_4X4_1000')
- * @throws {Error} If dictionary name is unknown
+ * @throws {Error} If dictionary name is unknown or library fails to load
  */
 export async function loadArucoLibrary(dict = 'ARUCO_4X4_1000') {
-  const urls = DICT_URLS[dict]
-  if (!urls) throw new Error(`Unknown ArUco dictionary: ${dict}`)
-  for (const url of urls) await loadScript(url)
+  const loader = DICT_LOADERS[dict]
+  if (!loader) throw new Error(`Unknown ArUco dictionary: ${dict}`)
+
+  if (!AR) {
+    const mod = await import('js-aruco2')
+    AR = mod.AR || mod.default?.AR
+    if (!AR) throw new Error('Failed to load ArUco library')
+    // Expose globally so dictionary files can find it via this.AR / window.AR
+    window.AR = AR
+  }
+
+  if (!AR.DICTIONARIES?.[dict]) {
+    await loader()
+  }
 }
 
 /**
@@ -46,8 +40,8 @@ export async function loadArucoLibrary(dict = 'ARUCO_4X4_1000') {
  * @throws {Error} If library is not loaded
  */
 export function createDetector(dict = 'ARUCO_4X4_1000') {
-  if (!window.AR?.Detector) throw new Error('ArUco library not loaded')
-  return new window.AR.Detector({ dictionaryName: dict })
+  if (!AR?.Detector) throw new Error('ArUco library not loaded')
+  return new AR.Detector({ dictionaryName: dict })
 }
 
 /**

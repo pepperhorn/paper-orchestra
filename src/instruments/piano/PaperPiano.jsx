@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
-import { buildKeyboard, TAG_INV, POSITION_TAGS, PRESS_VEL } from './piano-config'
+import { buildKeyboard, buildPositionTags, TAG_INV, PRESS_VEL } from './piano-config'
 import { processCoveredTags, processFrame, drawMarkerOverlays } from './piano-engine'
 import { CHORD_TYPES, buildChordNotes, detectChord } from '@shared/engine/chords'
 import { ARP_PATTERNS, ARP_RATES, ArpEngine } from '@shared/engine/arp'
@@ -23,6 +23,8 @@ import PianoRoll, { usePianoRoll } from '@shared/components/ui/piano-roll'
 import TransportControls from '@shared/components/ui/transport-controls'
 import SettingsPanel from '@shared/components/ui/settings-panel'
 import { useTransport } from '@shared/hooks/use-transport'
+import { useOrchestra } from '@shared/hooks/use-orchestra'
+import OrchestraBadge from '@shared/components/ui/orchestra-badge'
 
 export default function PaperPiano() {
   const videoRef = useRef(null)
@@ -69,8 +71,16 @@ export default function PaperPiano() {
 
   const { roll, addNote, clear: clearRoll } = usePianoRoll()
   const { bpm, setBpm, metroActive, handleTap } = useTransport()
+  const orchestra = useOrchestra({
+    onBpmChange: (newBpm) => setBpm(newBpm),
+    onKeyChange: (key, scale) => { /* future: transpose */ },
+    onCommand: (cmd) => {
+      if (cmd === 'mute') synthRef.current?.allNotesOff()
+    },
+  })
 
-  const kb = buildKeyboard(octave)
+  const kb = buildKeyboard(octave, 1)
+  const positionTags = buildPositionTags(kb)
 
   // Initialize audio
   function ensureAudio() {
@@ -82,6 +92,17 @@ export default function PaperPiano() {
       const synth = createSynthEngine({ waveform, adsr, volume: -6 })
       synth.connect(effects.input)
       synthRef.current = synth
+      // Forward note events to orchestra
+      const origNoteOn = synth.noteOn.bind(synth)
+      const origNoteOff = synth.noteOff.bind(synth)
+      synth.noteOn = (id, freq, vel, time) => {
+        origNoteOn(id, freq, vel, time)
+        orchestra.sendNoteEvent(id, freq, vel, 'on')
+      }
+      synth.noteOff = (id, time) => {
+        origNoteOff(id, time)
+        orchestra.sendNoteEvent(id, 0, 0, 'off')
+      }
       arpRef.current = new ArpEngine(
         (id, freq, vel, t) => synth.noteOn(id, freq, vel, t),
         (id, t) => synth.noteOff(id, t)
@@ -171,9 +192,13 @@ export default function PaperPiano() {
       const n = Object.keys(knownMkrs.current).length
       if (n >= 8) {
         try { localStorage.setItem('airpiano_v3_markers', JSON.stringify(knownMkrs.current)) } catch (_) {}
+        const ids = Object.keys(knownMkrs.current).map(Number).sort((a, b) => a - b)
+        console.log(`[Piano] Scan complete: ${n} markers learned [${ids.join(',')}]`)
+        console.table(Object.fromEntries(ids.map(id => [id, { cx: Math.round(knownMkrs.current[id].cx), cy: Math.round(knownMkrs.current[id].cy) }])))
         setStatus('ready')
         setMessage(`Scan complete: ${n} markers learned. Place objects on buttons to activate modes!`)
       } else {
+        console.warn(`[Piano] Scan failed: only ${n}/8 markers found`)
         setMessage(`Only ${n} markers found — need at least 8. Try again.`)
       }
     }, 2000)
@@ -216,6 +241,8 @@ export default function PaperPiano() {
     }
   }
 
+  const debugRef = useRef({ last: 0, scanLogged: false })
+
   // Main detection loop
   function onResults(results) {
     fpsRef.current.n++
@@ -224,11 +251,20 @@ export default function PaperPiano() {
 
     const canvas = canvasRef.current; if (!canvas) return
     const ctx = canvas.getContext('2d')
-    setHandCount(results.multiHandLandmarks?.length || 0)
+    const hands = results.multiHandLandmarks?.length || 0
+    setHandCount(hands)
 
     // ArUco
     const arucoMarkers = detectMarkers(detRef.current, canvas)
     const visible = new Set(arucoMarkers.map(m => m.id))
+
+    // Periodic debug summary (every 3s)
+    if (now - debugRef.current.last >= 3000) {
+      debugRef.current.last = now
+      const ids = arucoMarkers.map(m => m.id).sort((a, b) => a - b)
+      const known = Object.keys(knownMkrs.current).length
+      console.log(`[Piano] ArUco: ${ids.length} visible [${ids.join(',')}] | Known: ${known} | Hands: ${hands} | Active: [${[...pressedRef.current].join(',')}] | Status: ${status}`)
+    }
 
     // Scan: learn positions
     if (scanRef.current) {
@@ -237,11 +273,17 @@ export default function PaperPiano() {
         const cy = m.corners.reduce((s, p) => s + p.y, 0) / 4
         knownMkrs.current[m.id] = { cx, cy }
       }
+      if (!debugRef.current.scanLogged && arucoMarkers.length > 0) {
+        debugRef.current.scanLogged = true
+        console.log(`[Piano] Scan: detecting markers...`, arucoMarkers.map(m => ({ id: m.id, cx: Math.round(m.corners.reduce((s, p) => s + p.x, 0) / 4), cy: Math.round(m.corners.reduce((s, p) => s + p.y, 0) / 4) })))
+      }
+    } else {
+      debugRef.current.scanLogged = false
     }
 
     // Process frame (draw camera + fingertips + key detection)
     const { newlyPressed } = processFrame(results, {
-      canvas, canvasCtx: ctx, markers: knownMkrs.current, positionTags: POSITION_TAGS,
+      canvas, canvasCtx: ctx, markers: knownMkrs.current, positionTags: positionTags,
       keyboard: kb, velTracker: velTrk.current, pressedRef, sustainRef, sustainHeld,
       sustainObj, chordType, arpPattern, arpRef, ribbonMode,
       synth: synthRef.current, buildChordNotes, setRibbonValue,
@@ -252,7 +294,7 @@ export default function PaperPiano() {
     drawMarkerOverlays(ctx, arucoMarkers)
 
     // Ghost markers
-    const covered = detectCoveredMarkers(knownMkrs.current, visible, POSITION_TAGS)
+    const covered = detectCoveredMarkers(knownMkrs.current, visible, positionTags)
     setCoveredTags(covered)
 
     // Mode state from covered tags
@@ -282,34 +324,43 @@ export default function PaperPiano() {
     synthRef.current?.allNotesOff(); pressedRef.current.clear(); sustainHeld.current.clear(); setActiveKeys(new Set())
   }, [octave])
 
-  // Piano SVG
-  const W = Math.min(600, typeof window !== 'undefined' ? window.innerWidth - 24 : 560)
-  function PianoSVG({ w = 600, h = 140 }) {
-    const N = kb.whites.length, wkW = w / N, bkW = wkW * 0.58, bkH = h * 0.62
+  // Piano SVG — uses viewBox coordinates, stretches to fill container
+  function PianoSVG() {
+    const vw = 800, vh = 400 // viewBox coordinate space
+    const N = kb.whites.length, wkW = vw / N, bkW = wkW * 0.58, bkH = vh * 0.62
     return (
-      <svg width={w} height={h} style={{ display: 'block', margin: '0 auto', filter: 'drop-shadow(0 4px 20px rgba(0,0,0,0.6))' }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${vw} ${vh}`} preserveAspectRatio="none" style={{ display: 'block' }}>
         <defs>
-          <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5f0e8" /><stop offset="100%" stopColor="#e0d8c8" /></linearGradient>
-          <linearGradient id="wa" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ffd166" /><stop offset="100%" stopColor="#ff9020" /></linearGradient>
-          <linearGradient id="bkn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#222" /><stop offset="100%" stopColor="#0a0a0a" /></linearGradient>
-          <linearGradient id="bka" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ff8020" /><stop offset="100%" stopColor="#cc5010" /></linearGradient>
+          <filter id="glow-green">
+            <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#22c55e" floodOpacity="0.8" />
+          </filter>
         </defs>
         {kb.whites.map((k, i) => {
           const active = activeKeys.has(k.id)
           return (
             <g key={k.id}>
-              <rect x={i * wkW + 1} y={1} width={wkW - 2} height={h - 2} rx={4} fill={active ? 'url(#wa)' : 'url(#wg)'} stroke={active ? '#e87010' : '#444'} strokeWidth={active ? 2 : 1} />
-              {chordType && activeKeys.has(k.id) && <rect x={i * wkW + 2} y={2} width={wkW - 4} height={5} rx={2} fill="#ff4040" />}
-              <text x={i * wkW + wkW / 2} y={h - 11} textAnchor="middle" fontSize={12} fontFamily="Georgia,serif" fontWeight="bold" fill={active ? '#7a3000' : '#666'}>{k.label}</text>
+              <rect x={i * wkW + 0.5} y={0.5} width={wkW - 1} height={vh - 1} rx={3}
+                fill={active ? '#22c55e' : '#fafafa'}
+                stroke={active ? '#16a34a' : '#d1d5db'} strokeWidth={active ? 2 : 1}
+                filter={active ? 'url(#glow-green)' : undefined} />
+              <text x={i * wkW + wkW / 2} y={vh - 14} textAnchor="middle"
+                fontSize={18} fontFamily="Poppins, sans-serif" fontWeight="500"
+                fill={active ? '#ffffff' : '#9ca3af'}>{k.label}</text>
             </g>
           )
         })}
         {kb.blacks.map(k => {
-          const active = activeKeys.has(k.id), x = (k.leftWhiteIdx + 1) * wkW - bkW / 2
+          const active = activeKeys.has(k.id)
+          const x = (k.leftWhiteIdx + 1) * wkW - bkW / 2
           return (
             <g key={k.id}>
-              <rect x={x} y={0} width={bkW} height={bkH} rx={3} fill={active ? 'url(#bka)' : 'url(#bkn)'} stroke={active ? '#ff6010' : '#000'} strokeWidth={1} />
-              <text x={x + bkW / 2} y={bkH - 8} textAnchor="middle" fontSize={8} fontFamily="monospace" fill={active ? '#fff' : '#777'}>{k.label}</text>
+              <rect x={x} y={0} width={bkW} height={bkH} rx={2}
+                fill={active ? '#16a34a' : '#1f2937'}
+                stroke={active ? '#22c55e' : '#111827'} strokeWidth={active ? 2 : 1}
+                filter={active ? 'url(#glow-green)' : undefined} />
+              <text x={x + bkW / 2} y={bkH - 10} textAnchor="middle"
+                fontSize={14} fontFamily="monospace"
+                fill={active ? '#ffffff' : '#6b7280'}>{k.label}</text>
             </g>
           )
         })}
@@ -320,104 +371,131 @@ export default function PaperPiano() {
   return (
     <InstrumentShell
       name="Paper Piano"
-      version="PepperHorn x CRF · v3.1 · 2-Octave Marker-Based + Chord + Arp + Ribbon"
       fps={fps}
       handCount={handCount}
       status={status}
       statusMessage={message}
       onClickCapture={ensureAudio}
-      sidebar={
-        <div className="flex flex-col gap-2 items-center">
-          <MeterBar label={ribbonMode.toUpperCase()} value={ribbonValue} color={ribbonMode === 'mod' ? '#60c0ff' : '#ffa030'} />
-          {coveredTags.size > 0 && (
-            <div className="bg-white/[0.04] border border-white/[0.08] rounded-md p-1.5 w-[58px]">
-              <div className="text-[0.52rem] text-text-dim mb-0.5">ACTIVE</div>
-              {[...coveredTags].slice(0, 6).map(tid => (
-                <div key={tid} className="text-[0.5rem] text-accent/80 font-mono leading-relaxed">{TAG_INV[tid] || `#${tid}`}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      }
+      className="h-screen overflow-hidden"
     >
-      {/* Camera */}
-      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef} status={status}>
+      {/* Camera — maintains 4:3 ratio, height-limited, centered */}
+      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef} className="max-h-[40%] w-auto self-center shrink-0">
         {/* Mode pills */}
-        <div className="absolute top-1.5 left-1.5 flex gap-1 flex-wrap">
-          {chordType && <div className="bg-purple-600/75 rounded px-2 py-0.5 text-[0.65rem] text-purple-100">● {CHORD_TYPES[chordType]?.label}</div>}
-          {arpPattern !== 'off' && <div className="bg-blue-600/75 rounded px-2 py-0.5 text-[0.65rem] text-blue-100">♩ {ARP_PATTERNS[arpPattern]?.label} {ARP_RATES[arpRate]?.label}</div>}
+        <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
+          {chordType && <div className="bg-black/60 rounded px-2 py-0.5 text-xs text-white">{CHORD_TYPES[chordType]?.label}</div>}
+          {arpPattern !== 'off' && <div className="bg-black/60 rounded px-2 py-0.5 text-xs text-white">{ARP_PATTERNS[arpPattern]?.label} {ARP_RATES[arpRate]?.label}</div>}
         </div>
-        {chord && !chordType && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/80 rounded-md px-3 py-0.5 text-[0.95rem] font-bold text-accent font-display">{chord}</div>}
-        {chordType && activeKeys.size > 0 && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/80 rounded-md px-3 py-0.5 text-[0.95rem] font-bold text-purple-300 font-display">{[...activeKeys][0]?.split(/\d/)[0]}{CHORD_TYPES[chordType]?.symbol}</div>}
-        {(sustain || sustainObj) && <div className="absolute top-1.5 right-1.5 bg-info/30 border border-info/60 rounded px-2 py-0.5 text-[0.62rem] text-info">{sustainObj ? 'OBJ HOLD' : 'SUSTAIN'}</div>}
+        {chord && !chordType && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 rounded-md px-3 py-0.5 text-sm font-medium text-white">{chord}</div>}
+        {chordType && activeKeys.size > 0 && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 rounded-md px-3 py-0.5 text-sm font-medium text-white">{[...activeKeys][0]?.split(/\d/)[0]}{CHORD_TYPES[chordType]?.symbol}</div>}
+        {(sustain || sustainObj) && <div className="absolute top-2 right-2 bg-black/60 rounded px-2 py-0.5 text-xs text-white">{sustainObj ? 'HOLD' : 'SUSTAIN'}</div>}
       </CameraOverlay>
 
-      {/* Piano keyboard */}
-      <div className="w-full mt-2"><PianoSVG w={W} h={130} /></div>
+      {/* Piano keyboard — fills remaining vertical space */}
+      <div className="flex-1 min-h-0 w-full"><PianoSVG /></div>
 
-      {/* Piano roll */}
-      <div className="w-full mt-2"><PianoRoll roll={roll} /></div>
-
-      {/* Transport */}
-      <div className="w-full mt-2 max-w-[600px]">
-        <TransportControls
-          recordings={recEngine.current.recordings}
-          recArmed={recArmed}
-          recSlot={recSlot}
-          playSlot={playSlot}
-          bpm={bpm}
-          metroActive={metroActive}
-          onToggleArm={() => { if (recSlot !== null) { synthRef.current.onRecord = null; recEngine.current.stopRecording(); setRecSlot(null) } setRecArmed(a => !a) }}
-          onSlotClick={handleSlotClick}
-          onSlotClear={(i) => { recEngine.current.clearSlot(i); if (playSlot === i) setPlaySlot(null) }}
-          onTap={handleTap}
-          onBpmChange={setBpm}
-        />
-      </div>
-
-      {/* Controls */}
-      <div className="flex gap-1.5 flex-wrap justify-center w-full max-w-[600px] mt-2">
-        <div className="flex items-center gap-1 bg-white/[0.05] rounded-md px-2.5 py-0.5">
-          <span className="text-[0.62rem] text-text-muted">OCT</span>
-          <button onClick={() => setOctave(o => Math.max(2, o - 1))} className="text-text-primary cursor-pointer bg-transparent border-none px-1">−</button>
-          <span className="font-mono text-accent min-w-3.5 text-center text-[0.9rem]">{octave}</span>
-          <button onClick={() => setOctave(o => Math.min(5, o + 1))} className="text-text-primary cursor-pointer bg-transparent border-none px-1">+</button>
-        </div>
-        {['sine', 'triangle', 'sawtooth', 'square'].map(w => (
-          <button key={w} onClick={() => setWaveform(w)} className={`rounded-md px-2 py-0.5 text-[0.68rem] border cursor-pointer ${waveform === w ? 'bg-accent/20 border-accent/50 text-accent' : 'bg-white/[0.05] border-white/10 text-text-muted'}`}>{w}</button>
-        ))}
-        <div className="flex items-center gap-1 bg-white/[0.05] rounded-md px-2 py-0.5">
-          <span className="text-[0.62rem] text-text-muted">BPM</span>
-          <input type="number" value={bpm} min={40} max={240} onChange={e => setBpm(Number(e.target.value))} className="w-10 bg-transparent border-none text-accent font-mono text-[0.82rem] text-center outline-none" />
-        </div>
+      {/* Control bar */}
+      <div className="flex items-center gap-2 w-full flex-wrap shrink-0">
         <ScanButton scanning={scanning} status={status} onScan={startScan} onReset={resetScan} />
-        <button onClick={() => setShowSettings(s => !s)} className="rounded-md px-2.5 py-0.5 text-[0.68rem] border cursor-pointer bg-white/[0.05] border-white/10 text-text-primary">{showSettings ? '▲' : 'settings'}</button>
+        <div className="flex items-center gap-1 border border-gray-200 rounded-md px-2.5 py-1.5">
+          <span className="text-xs text-gray-400">OCT</span>
+          <button onClick={() => setOctave(o => Math.max(2, o - 1))} className="text-gray-900 cursor-pointer bg-transparent border-none px-1 text-sm font-medium">−</button>
+          <span className="font-mono text-sm text-gray-900 min-w-4 text-center">{octave}</span>
+          <button onClick={() => setOctave(o => Math.min(5, o + 1))} className="text-gray-900 cursor-pointer bg-transparent border-none px-1 text-sm font-medium">+</button>
+        </div>
+        <div className="ml-auto">
+          <button
+            onClick={() => setShowSettings(s => !s)}
+            className="rounded-md px-3 py-1.5 text-xs font-medium border border-gray-200 text-gray-500 cursor-pointer hover:bg-gray-50 transition-colors"
+          >
+            {showSettings ? 'Hide' : 'Settings'}
+          </button>
+        </div>
       </div>
 
       {/* Settings panel */}
       <SettingsPanel open={showSettings} onOpenChange={setShowSettings}>
-        <div className="flex gap-3.5 flex-wrap justify-center">
+        {/* Waveform */}
+        <div className="flex gap-2 flex-wrap">
+          {['sine', 'triangle', 'sawtooth', 'square'].map(w => (
+            <button
+              key={w}
+              onClick={() => setWaveform(w)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium border cursor-pointer transition-colors ${
+                waveform === w
+                  ? 'bg-gray-900 border-gray-900 text-white'
+                  : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {w}
+            </button>
+          ))}
+        </div>
+
+        {/* Volume + Reverb */}
+        <div className="flex gap-4 flex-wrap justify-center">
           <Knob label="Volume" value={volume} min={0} max={1} step={0.01} onChange={setVolume} fmt={v => `${Math.round(v * 100)}%`} />
           <Knob label="Reverb" value={reverbAmt} min={0} max={1} step={0.01} onChange={setReverbAmt} fmt={v => `${Math.round(v * 100)}%`} />
         </div>
-        <div className="border-t border-white/[0.06] pt-2.5">
-          <div className="text-[0.58rem] text-text-dim tracking-wider text-center mb-2">ADSR ENVELOPE</div>
-          <div className="flex gap-3 flex-wrap justify-center">
+
+        {/* ADSR */}
+        <div className="border-t border-gray-200 pt-3">
+          <div className="text-[0.6rem] text-gray-400 tracking-wider text-center mb-2 uppercase font-medium">Envelope</div>
+          <div className="flex gap-4 flex-wrap justify-center">
             <Knob label="Atk" value={adsr.attack} min={0.005} max={2} step={0.005} onChange={v => setAdsr(a => ({ ...a, attack: v }))} fmt={v => `${v.toFixed(2)}s`} />
             <Knob label="Dec" value={adsr.decay} min={0.01} max={2} step={0.01} onChange={v => setAdsr(a => ({ ...a, decay: v }))} fmt={v => `${v.toFixed(2)}s`} />
             <Knob label="Sus" value={adsr.sustain} min={0} max={1} step={0.01} onChange={v => setAdsr(a => ({ ...a, sustain: v }))} fmt={v => `${Math.round(v * 100)}%`} />
             <Knob label="Rel" value={adsr.release} min={0.05} max={4} step={0.05} onChange={v => setAdsr(a => ({ ...a, release: v }))} fmt={v => `${v.toFixed(2)}s`} />
           </div>
         </div>
-        <div className="flex gap-1.5 justify-center border-t border-white/[0.06] pt-2.5">
-          <button onClick={clearRoll} className="px-3 py-1 rounded-md text-[0.68rem] bg-white/[0.05] border border-white/10 text-text-primary cursor-pointer">Clear roll</button>
-          <button onClick={() => synthRef.current?.allNotesOff()} className="px-3 py-1 rounded-md text-[0.68rem] bg-error/10 border border-error/30 text-error/80 cursor-pointer">All notes off</button>
+
+        {/* BPM */}
+        <div className="border-t border-gray-200 pt-3 flex items-center gap-2">
+          <span className="text-xs text-gray-400 font-medium">BPM</span>
+          <input type="number" value={bpm} min={40} max={240} onChange={e => setBpm(Number(e.target.value))} className="w-14 bg-white border border-gray-200 rounded-md px-2 py-1 text-sm text-gray-900 font-mono text-center outline-none focus:border-gray-400" />
+        </div>
+
+        {/* Transport */}
+        <div className="border-t border-gray-200 pt-3">
+          <TransportControls
+            recordings={recEngine.current.recordings}
+            recArmed={recArmed}
+            recSlot={recSlot}
+            playSlot={playSlot}
+            bpm={bpm}
+            metroActive={metroActive}
+            onToggleArm={() => { if (recSlot !== null) { synthRef.current.onRecord = null; recEngine.current.stopRecording(); setRecSlot(null) } setRecArmed(a => !a) }}
+            onSlotClick={handleSlotClick}
+            onSlotClear={(i) => { recEngine.current.clearSlot(i); if (playSlot === i) setPlaySlot(null) }}
+            onTap={handleTap}
+            onBpmChange={setBpm}
+          />
+        </div>
+
+        {/* Piano roll */}
+        <div className="border-t border-gray-200 pt-3">
+          <PianoRoll roll={roll} />
+        </div>
+
+        {/* Ribbon / covered tags */}
+        <div className="border-t border-gray-200 pt-3 flex gap-4 items-center">
+          <MeterBar label={ribbonMode.toUpperCase()} value={ribbonValue} direction="horizontal" />
+          {coveredTags.size > 0 && (
+            <div className="text-xs text-gray-400 font-mono">
+              {[...coveredTags].slice(0, 4).map(tid => TAG_INV[tid] || `#${tid}`).join(', ')}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 justify-center border-t border-gray-200 pt-3">
+          <button onClick={clearRoll} className="px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-gray-200 text-gray-500 cursor-pointer hover:bg-gray-50">Clear roll</button>
+          <button onClick={() => synthRef.current?.allNotesOff()} className="px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-gray-200 text-gray-500 cursor-pointer hover:bg-gray-50">All notes off</button>
         </div>
       </SettingsPanel>
 
       {/* Back link */}
-      <Link to="/" className="flex items-center gap-1 text-text-dim text-sm hover:text-accent mt-2 no-underline">
-        <ArrowLeft size={14} /> Back to launcher
+      <Link to="/" className="flex items-center gap-1 text-gray-400 text-xs hover:text-gray-900 mt-1 no-underline transition-colors">
+        <ArrowLeft size={14} /> Back
       </Link>
     </InstrumentShell>
   )

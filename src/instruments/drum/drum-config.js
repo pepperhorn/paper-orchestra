@@ -1,4 +1,4 @@
-export const ARUCO_DICT = 'ARUCO_6X6_250'
+export const ARUCO_DICT = 'ARUCO_6X6_1000'
 export const PAD_COUNT = 8
 export const STRIKE_COOLDOWN = 150 // ms
 export const OCCLUSION_THRESHOLD = 0.5

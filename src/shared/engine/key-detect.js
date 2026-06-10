@@ -1,18 +1,19 @@
-export function computeKeyZoneParams(markers) {
-  const whiteIds = [0, 1, 2, 3, 4, 5, 6, 46, 47, 48, 49, 50, 51, 52, 58]
-  const blackIds = [8, 9, 10, 11, 12, 53, 54, 55, 56, 57]
+export function computeKeyZoneParams(markers, keyboard) {
+  // Derive available key markers from the keyboard definition
+  const whiteMarkers = keyboard.whites.filter(k => markers[k.tagId])
+  const blackMarkers = keyboard.blacks.filter(k => markers[k.tagId])
 
-  const whiteMarkers = whiteIds.filter(id => markers[id])
   if (whiteMarkers.length < 2) return null
 
-  const whiteXs = whiteMarkers.map(id => markers[id].cx).sort((a, b) => a - b)
+  const whiteXs = whiteMarkers.map(k => markers[k.tagId].cx).sort((a, b) => a - b)
   const avgKeyWidth = (whiteXs[whiteXs.length - 1] - whiteXs[0]) / (whiteXs.length - 1)
 
-  const allKeyYs = [...whiteIds, ...blackIds]
-    .filter(id => markers[id])
-    .map(id => markers[id].cy)
-  const markerRowY = allKeyYs.reduce((s, y) => s + y, 0) / allKeyYs.length
-  const keyZoneDepth = avgKeyWidth * 2.5
+  // Black markers sit near key tops, white markers sit lower — use topmost as zone start
+  const allKeyYs = [...whiteMarkers, ...blackMarkers].map(k => markers[k.tagId].cy)
+  const markerRowY = Math.min(...allKeyYs)
+
+  // Key zone extends downward from the topmost markers
+  const keyZoneDepth = avgKeyWidth * 3
 
   return { markerRowY, keyZoneDepth, avgKeyWidth }
 }

@@ -56,54 +56,54 @@
     letter-spacing: 0.08em;
   }
 
-  /* ─── Control section (compact) ─── */
+  /* ─── Control section ─── */
   .controls {
     display: flex;
     gap: 3mm;
     align-items: flex-start;
     margin-bottom: 2mm;
-    margin-left: 20mm; /* align with keyboard left (16mm ribbon + 4mm gap) */
+    margin-left: 24mm; /* align with keyboard left (20mm ribbon + 4mm gap) */
   }
   .ctrl-col {
     border: 0.3mm solid #999;
     border-radius: 2mm;
-    padding: 2mm 3mm;
+    padding: 2.5mm 3mm;
   }
   .ctrl-col-label {
     font-size: 9pt;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    margin-bottom: 1.5mm;
+    margin-bottom: 2mm;
     text-align: center;
   }
   .ctrl-grid {
     display: grid;
     grid-template-columns: repeat(3, auto);
-    gap: 2mm;
+    gap: 3mm;
     justify-items: center;
   }
   .ctrl-grid-4 {
     display: grid;
     grid-template-columns: repeat(4, auto);
-    gap: 2mm;
+    gap: 3mm;
     justify-items: center;
   }
   .ctrl-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5mm;
+    gap: 1mm;
   }
   .ctrl-label {
-    font-size: 8pt;
+    font-size: 7pt;
     color: #555;
     text-align: center;
     letter-spacing: 0.05em;
   }
   .ctrl-col-dual {
     display: flex;
-    gap: 3mm;
+    gap: 4mm;
   }
   .ctrl-col-dual > div {
     flex: 1;
@@ -122,9 +122,9 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-evenly;
     gap: 0;
-    width: 16mm;
+    width: 20mm;
     flex-shrink: 0;
   }
   .ribbon-marker {
@@ -133,37 +133,18 @@
     gap: 1.5mm;
   }
   .ribbon-label {
-    font-size: 8pt;
+    font-size: 7pt;
     color: #888;
     width: 5mm;
     text-align: right;
   }
 
-  /* Key area */
+  /* Key area — no separate marker row, markers are inside keys */
   .key-area {
     flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
-  }
-
-  /* Key markers row */
-  .key-markers {
-    position: relative;
-    height: 16mm;
-    margin-bottom: 1mm;
-    flex-shrink: 0;
-  }
-  .key-marker {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5mm;
-  }
-  .key-marker-label {
-    font-size: 11pt;
-    color: #888;
   }
 
   /* Piano keys — fills remaining space */
@@ -181,12 +162,9 @@
     height: 100%;
     border-right: 0.3mm solid #333;
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: center;
-    padding-bottom: 5mm;
-    font-size: 22pt;
-    font-weight: 600;
-    color: #aaa;
+    padding-top: 50mm; /* below black key zone — vertical separation from black key markers */
   }
   .white-key:last-of-type {
     border-right: none;
@@ -199,12 +177,9 @@
     border-radius: 0 0 2mm 2mm;
     z-index: 2;
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: center;
-    padding-bottom: 4mm;
-    font-size: 14pt;
-    font-weight: 600;
-    color: #999;
+    padding-top: 3mm;
   }
 
   /* ─── ArUco marker canvas ─── */
@@ -251,20 +226,17 @@
     <div class="subtitle">1-Octave · Place flat · Camera overhead · Tap keys</div>
   </div>
 
-  <!-- Control markers (compact, above keyboard) -->
+  <!-- Control markers (above keyboard) -->
   <div class="controls" id="controls"></div>
 
-  <!-- Keyboard section: ribbon + key markers + piano keys -->
+  <!-- Keyboard section: ribbon + piano keys (markers inside keys) -->
   <div class="keyboard-section">
     <!-- Ribbon strip -->
     <div class="ribbon-col" id="ribbon-col"></div>
 
     <!-- Key area -->
     <div class="key-area">
-      <!-- Key markers row -->
-      <div class="key-markers" id="key-markers"></div>
-
-      <!-- Piano keys (fills remaining height) -->
+      <!-- Piano keys with markers inside (fills all height) -->
       <div class="piano" id="piano"></div>
     </div>
   </div>
@@ -302,7 +274,7 @@ function decodeBits(bytes) {
   return grid;
 }
 
-function makeMarker(id, sizeMM) {
+function makeMarker(id, sizeMM, cssClass) {
   const cellCount = 6;
   const pxPerCell = 12;
   const totalPx = cellCount * pxPerCell;
@@ -310,7 +282,7 @@ function makeMarker(id, sizeMM) {
   const canvas = document.createElement('canvas');
   canvas.width = totalPx;
   canvas.height = totalPx;
-  canvas.className = 'aruco';
+  canvas.className = 'aruco' + (cssClass ? ' ' + cssClass : '');
   canvas.style.width = sizeMM + 'mm';
   canvas.style.height = sizeMM + 'mm';
   canvas.title = 'ID ' + id;
@@ -335,76 +307,44 @@ function makeMarker(id, sizeMM) {
 
 // ─── Layout: 1 octave (C–C) = 8 white keys ─────────────────────────────────
 const NUM_WHITES = 8; // C D E F G A B C
-const KEYBOARD_W = 257; // mm (page width minus ribbon and margins)
-const WHITE_KEY_W = KEYBOARD_W / NUM_WHITES; // ~32mm per key
-const KEY_MARKER_SIZE = 10; // mm (larger — more space per key)
-const RIBBON_MARKER_SIZE = 8; // mm
-const CTRL_MARKER_SIZE = 10; // mm (compact controls)
-
-const WHITE_LABELS = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'];
+const KEYBOARD_W = 253; // mm (page width minus ribbon col and margins)
+const WHITE_KEY_W = KEYBOARD_W / NUM_WHITES; // ~31.6mm per key
+const KEY_MARKER_SIZE = 15; // mm — 50% larger than v2
+const BLACK_KEY_MARKER_SIZE = 14; // mm — fits inside black keys
+const RIBBON_MARKER_SIZE = 12; // mm — 50% larger than v2
+const CTRL_MARKER_SIZE = 15; // mm — 50% larger than v2
 
 // White key marker IDs: oct1 C-B = 0-6, top C = 58
-const WHITE_IDS = [0, 1, 2, 3, 4, 5, 6, 58];
+const WHITE_IDS   = [0, 1, 2, 3, 4, 5, 6, 58];
+const WHITE_NOTES = ['c', 'd', 'e', 'f', 'g', 'a', 'b', 'c-hi'];
 
 // Black keys: C# D# F# G# A# = IDs 8-12
-const BLACK_IDS = [8, 9, 10, 11, 12];
-const BLACK_LABEL_NAMES = ['C#', 'D#', 'F#', 'G#', 'A#'];
-// Black key positions as index of white key to the LEFT
+const BLACK_IDS   = [8, 9, 10, 11, 12];
+const BLACK_NOTES = ['cs', 'ds', 'fs', 'gs', 'as'];
 const BLACK_LEFT_WHITE = [0, 1, 3, 4, 5];
 
-const whiteXs = WHITE_LABELS.map((_, i) => i * WHITE_KEY_W + WHITE_KEY_W / 2);
-const blackXs = BLACK_LEFT_WHITE.map(lw => (lw + 1) * WHITE_KEY_W);
-
-// ─── Build key markers row ────────────────────────────────────────────────
-const keyMarkersEl = document.getElementById('key-markers');
-
-whiteXs.forEach((x, i) => {
-  const wrap = document.createElement('div');
-  wrap.className = 'key-marker';
-  wrap.style.left = (x - KEY_MARKER_SIZE / 2) + 'mm';
-  wrap.style.top = '0';
-  wrap.appendChild(makeMarker(WHITE_IDS[i], KEY_MARKER_SIZE));
-  const lbl = document.createElement('div');
-  lbl.className = 'key-marker-label';
-  lbl.textContent = WHITE_LABELS[i];
-  wrap.appendChild(lbl);
-  keyMarkersEl.appendChild(wrap);
-});
-
-blackXs.forEach((x, i) => {
-  const wrap = document.createElement('div');
-  wrap.className = 'key-marker';
-  wrap.style.left = (x - KEY_MARKER_SIZE / 2) + 'mm';
-  wrap.style.top = '0';
-  wrap.appendChild(makeMarker(BLACK_IDS[i], KEY_MARKER_SIZE));
-  const lbl = document.createElement('div');
-  lbl.className = 'key-marker-label';
-  lbl.textContent = BLACK_LABEL_NAMES[i];
-  wrap.appendChild(lbl);
-  keyMarkersEl.appendChild(wrap);
-});
-
-// ─── Build piano keys (visual) ──────────────────────────────────────────
+// ─── Build piano keys with markers inside ────────────────────────────────
 const pianoEl = document.getElementById('piano');
 pianoEl.style.width = KEYBOARD_W + 'mm';
-keyMarkersEl.style.width = KEYBOARD_W + 'mm';
 
+// White keys — marker at top center, no pitch label
 for (let i = 0; i < NUM_WHITES; i++) {
   const key = document.createElement('div');
   key.className = 'white-key';
   key.style.left = (i * WHITE_KEY_W) + 'mm';
   key.style.width = WHITE_KEY_W + 'mm';
-  key.textContent = WHITE_LABELS[i];
+  key.appendChild(makeMarker(WHITE_IDS[i], KEY_MARKER_SIZE, 'aruco-white-key aruco-note-' + WHITE_NOTES[i]));
   pianoEl.appendChild(key);
 }
 
-const BLACK_W = WHITE_KEY_W * 0.58;
+// Black keys — marker at top center, no pitch label
+const BLACK_W = WHITE_KEY_W * 0.62; // slightly wider than v2 (0.58) to fit 14mm markers
 BLACK_LEFT_WHITE.forEach((lw, i) => {
   const key = document.createElement('div');
   key.className = 'black-key';
   key.style.left = ((lw + 1) * WHITE_KEY_W - BLACK_W / 2) + 'mm';
   key.style.width = BLACK_W + 'mm';
-  key.textContent = BLACK_LABEL_NAMES[i];
+  key.appendChild(makeMarker(BLACK_IDS[i], BLACK_KEY_MARKER_SIZE, 'aruco-black-key aruco-note-' + BLACK_NOTES[i]));
   pianoEl.appendChild(key);
 });
 
@@ -418,14 +358,14 @@ for (let i = 9; i >= 0; i--) {
   lbl.className = 'ribbon-label';
   lbl.textContent = 'R' + i;
   row.appendChild(lbl);
-  row.appendChild(makeMarker(id, RIBBON_MARKER_SIZE));
+  row.appendChild(makeMarker(id, RIBBON_MARKER_SIZE, 'aruco-ribbon'));
   ribbonEl.appendChild(row);
 }
 
-// ─── Build control section (compact) ────────────────────────────────────
+// ─── Build control section ───────────────────────────────────────────────
 const controlsEl = document.getElementById('controls');
 
-function makeCtrlCol(label, items, gridClass) {
+function makeCtrlCol(label, items, gridClass, cssClass) {
   const col = document.createElement('div');
   col.className = 'ctrl-col';
   const lbl = document.createElement('div');
@@ -439,7 +379,7 @@ function makeCtrlCol(label, items, gridClass) {
   items.forEach(item => {
     const wrap = document.createElement('div');
     wrap.className = 'ctrl-item';
-    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE, cssClass || 'aruco-ctrl'));
     const cl = document.createElement('div');
     cl.className = 'ctrl-label';
     cl.textContent = item.label;
@@ -454,7 +394,7 @@ function makeCtrlCol(label, items, gridClass) {
 makeCtrlCol('CHORD', [
   {id:23, label:'MAJ'}, {id:24, label:'MIN'}, {id:25, label:'MAJ7'}, {id:26, label:'DOM7'},
   {id:27, label:'\u00BDDIM'}, {id:28, label:'DIM'}, {id:29, label:'AUG'}, {id:30, label:'PWR'},
-], 'ctrl-grid-4');
+], 'ctrl-grid-4', 'aruco-chord');
 
 // ARP + RATE combined
 (function() {
@@ -474,7 +414,7 @@ makeCtrlCol('CHORD', [
    {id:34, label:'\u25B2\u25BC'}, {id:35, label:'RND'}].forEach(item => {
     const wrap = document.createElement('div');
     wrap.className = 'ctrl-item';
-    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE, 'aruco-arp'));
     const cl = document.createElement('div');
     cl.className = 'ctrl-label';
     cl.textContent = item.label;
@@ -494,7 +434,7 @@ makeCtrlCol('CHORD', [
    {id:39, label:'\u266A'}, {id:40, label:'\u266C'}].forEach(item => {
     const wrap = document.createElement('div');
     wrap.className = 'ctrl-item';
-    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE));
+    wrap.appendChild(makeMarker(item.id, CTRL_MARKER_SIZE, 'aruco-rate'));
     const cl = document.createElement('div');
     cl.className = 'ctrl-label';
     cl.textContent = item.label;
@@ -512,7 +452,7 @@ makeCtrlCol('CHORD', [
 makeCtrlCol('CTRL', [
   {id:41, label:'OCT\u2212'}, {id:42, label:'OCT+'}, {id:43, label:'SUSTAIN'},
   {id:44, label:'MOD'}, {id:45, label:'VOL'},
-]);
+], null, 'aruco-ctrl');
 </script>
 </body>
 </html>

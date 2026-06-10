@@ -10,6 +10,8 @@ import { audioManager } from '@shared/audio/manager'
 import InstrumentShell from '@shared/components/ui/instrument-shell'
 import CameraOverlay from '@shared/components/ui/camera-overlay'
 import ScanButton from '@shared/components/ui/scan-button'
+import OrchestraBadge from '@shared/components/ui/orchestra-badge'
+import { useOrchestra } from '@shared/hooks/use-orchestra'
 
 export default function PaperDrum() {
   const videoRef = useRef(null)
@@ -26,6 +28,11 @@ export default function PaperDrum() {
   const [scanning, setScanning] = useState(false)
   const [padStates, setPadStates] = useState([]) // [{id, name, lastStrike}]
   const [flashPads, setFlashPads] = useState(new Set())
+
+  const orchestra = useOrchestra({
+    onBpmChange: () => {},
+    onCommand: () => {},
+  })
 
   // Load libraries
   useEffect(() => {
@@ -79,6 +86,7 @@ export default function PaperDrum() {
     src.connect(gain)
     gain.connect(ctx.destination)
     src.start()
+    orchestra.sendNoteEvent(padIndex, 0, vel, 'on')
 
     setFlashPads(prev => { const next = new Set(prev); next.add(padIndex); return next })
     setTimeout(() => setFlashPads(prev => { const next = new Set(prev); next.delete(padIndex); return next }), 120)
@@ -154,10 +162,10 @@ export default function PaperDrum() {
           // Draw detected pad outline
           ctx.beginPath()
           ctx.arc(cx, cy, 30, 0, Math.PI * 2)
-          ctx.strokeStyle = '#7ad890'
+          ctx.strokeStyle = '#22c55e'
           ctx.lineWidth = 3
           ctx.stroke()
-          ctx.fillStyle = 'rgba(122,216,144,0.15)'
+          ctx.fillStyle = 'rgba(34,197,94,0.15)'
           ctx.fill()
           ctx.fillStyle = '#fff'
           ctx.font = 'bold 12px monospace'
@@ -179,11 +187,11 @@ export default function PaperDrum() {
           const flash = flashPads.has(i)
           ctx.beginPath()
           ctx.arc(pad.cx, pad.cy, flash ? 35 : 28, 0, Math.PI * 2)
-          ctx.strokeStyle = flash ? '#ffd166' : '#60c0ff'
+          ctx.strokeStyle = flash ? '#111827' : '#9ca3af'
           ctx.lineWidth = flash ? 4 : 2
           ctx.stroke()
           if (flash) {
-            ctx.fillStyle = 'rgba(255,209,102,0.3)'
+            ctx.fillStyle = 'rgba(17,24,39,0.2)'
             ctx.fill()
           }
           ctx.fillStyle = '#fff'
@@ -201,29 +209,28 @@ export default function PaperDrum() {
   return (
     <InstrumentShell
       name="Paper Drum"
-      version="PepperHorn x CRF · Colour-ring pad detection"
       status={status}
       statusMessage={message}
       onClickCapture={() => audioManager.ensure()}
     >
-      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef} status={status} />
+      <CameraOverlay videoRef={videoRef} canvasRef={canvasRef} />
 
       {/* Pad list */}
       {padStates.length > 0 && (
-        <div className="w-full mt-2 bg-white/[0.04] border border-white/[0.08] rounded-lg p-2.5">
-          <div className="text-[0.58rem] text-text-dim tracking-wider mb-1.5">PADS</div>
-          <div className="grid grid-cols-4 gap-1.5">
+        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <div className="text-[0.6rem] text-gray-400 tracking-wider mb-1.5 uppercase font-medium">Pads</div>
+          <div className="grid grid-cols-4 gap-2">
             {padStates.map((pad, i) => (
               <div
                 key={pad.id}
-                className={`rounded-md px-2 py-1.5 text-center text-[0.68rem] border transition-all duration-100 ${
+                className={`rounded-md px-2 py-1.5 text-center text-xs border transition-all duration-100 ${
                   flashPads.has(i)
-                    ? 'bg-accent/30 border-accent/60 text-accent scale-105'
-                    : 'bg-white/[0.05] border-white/10 text-text-muted'
+                    ? 'bg-gray-900 border-gray-900 text-white scale-105'
+                    : 'bg-white border-gray-200 text-gray-500'
                 }`}
               >
-                <div className="font-mono text-[0.56rem] text-text-dim">#{pad.id}</div>
-                <div className="font-bold">{pad.name}</div>
+                <div className="font-mono text-[0.6rem] text-gray-300">#{pad.id}</div>
+                <div className="font-medium">{pad.name}</div>
               </div>
             ))}
           </div>
@@ -231,12 +238,12 @@ export default function PaperDrum() {
       )}
 
       {/* Controls */}
-      <div className="flex gap-1.5 flex-wrap justify-center w-full max-w-[600px] mt-2">
+      <div className="flex gap-2 flex-wrap justify-center w-full">
         <ScanButton scanning={scanning} status={status} onScan={startScan} onReset={resetScan} />
       </div>
 
-      <Link to="/" className="flex items-center gap-1 text-text-dim text-sm hover:text-accent mt-4 no-underline">
-        <ArrowLeft size={14} /> Back to launcher
+      <Link to="/" className="flex items-center gap-1 text-gray-400 text-xs hover:text-gray-900 mt-2 no-underline transition-colors">
+        <ArrowLeft size={14} /> Back
       </Link>
     </InstrumentShell>
   )
